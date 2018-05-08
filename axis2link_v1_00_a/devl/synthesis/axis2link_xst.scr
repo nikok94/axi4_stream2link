@@ -1,0 +1,12 @@
+run
+-opt_level 2
+-opt_mode speed
+-ifmt mixed
+-ifn "C:\LEMZ-T\COAL_RBS\uart_ddr_test\pcores\axis2link_v1_00_a\devl\synthesis\axis2link_xst.prj"
+-top axis2link
+-p virtex6
+-ofn "C:\LEMZ-T\COAL_RBS\uart_ddr_test\pcores\axis2link_v1_00_a\devl\synthesis\axis2link_xst.ngc"
+-iobuf NO
+-rtlview YES
+-hierarchy_separator /
+-work_lib axis2link_v1_00_a
