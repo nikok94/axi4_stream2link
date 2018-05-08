@@ -1,5 +1,5 @@
 ------------------------------------------------------------------------------
--- user_logic.vhd - entity/architecture pair
+-- link_interface.vhd - entity/architecture pair
 ------------------------------------------------------------------------------
 --
 -- ***************************************************************************
@@ -23,7 +23,7 @@
 -- ***************************************************************************
 --
 ------------------------------------------------------------------------------
--- Filename:          user_logic.vhd
+-- Filename:          link_interface.vhd
 -- Version:           1.00.a
 -- Description:       User logic.
 -- Date:              Tue May 08 15:32:08 2018 (by Create and Import Peripheral Wizard)
@@ -81,13 +81,14 @@ use proc_common_v3_00_a.proc_common_pkg.all;
 --   IP2Bus_Error                 -- IP to Bus error response
 ------------------------------------------------------------------------------
 
-entity user_logic is
+entity link_interface is
   generic
   (
     -- ADD USER GENERICS BELOW THIS LINE ---------------
     --USER generics added here
     -- ADD USER GENERICS ABOVE THIS LINE ---------------
-
+    C_S_AXIS_CLK_FREQ_HZ           : integer              := 100_000_000;
+    C_S_AXIS_TDATA_WIDTH           : integer              := 32
     -- DO NOT EDIT BELOW THIS LINE ---------------------
     -- Bus protocol parameters, do not add to or delete
     C_NUM_REG                      : integer              := 4;
@@ -111,8 +112,15 @@ entity user_logic is
     IP2Bus_Data                    : out std_logic_vector(C_SLV_DWIDTH-1 downto 0);
     IP2Bus_RdAck                   : out std_logic;
     IP2Bus_WrAck                   : out std_logic;
-    IP2Bus_Error                   : out std_logic
+    IP2Bus_Error                   : out std_logic;
     -- DO NOT EDIT ABOVE THIS LINE ---------------------
+    s_axis_tdata                   : in  std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0) := (others => '0');
+    s_axis_tvalid                  : in  std_logic:= '0';
+    s_axis_tready                  : out std_logic;
+    
+    Lx_DAT                         : out std_logic_vector(7 downto 0);
+    Lx_ACK                         : in std_logic;
+    Lx_CLK                         : out std_logic
   );
 
   attribute MAX_FANOUT : string;
@@ -121,13 +129,13 @@ entity user_logic is
   attribute SIGIS of Bus2IP_Clk    : signal is "CLK";
   attribute SIGIS of Bus2IP_Resetn : signal is "RST";
 
-end entity user_logic;
+end entity link_interface;
 
 ------------------------------------------------------------------------------
 -- Architecture section
 ------------------------------------------------------------------------------
 
-architecture IMP of user_logic is
+architecture IMP of link_interface is
 
   --USER signal declarations added here, as needed for user logic
 
@@ -177,24 +185,23 @@ begin
 
     if Bus2IP_Clk'event and Bus2IP_Clk = '1' then
       if Bus2IP_Resetn = '0' then
-        slv_reg0 <= (others => '0');
-        slv_reg1 <= (others => '0');
+        slv_reg0 <= x"AD05_2018";
+        slv_reg1 <= x"0000_0001";
         slv_reg2 <= (others => '0');
         slv_reg3 <= (others => '0');
       else
         case slv_reg_write_sel is
           when "1000" =>
-            for byte_index in 0 to (C_SLV_DWIDTH/8)-1 loop
-              if ( Bus2IP_BE(byte_index) = '1' ) then
-                slv_reg0(byte_index*8+7 downto byte_index*8) <= Bus2IP_Data(byte_index*8+7 downto byte_index*8);
-              end if;
-            end loop;
+                slv_reg0 <= slv_reg0;
           when "0100" =>
+            if Bus2IP_Data /= x"0000_0000" then
             for byte_index in 0 to (C_SLV_DWIDTH/8)-1 loop
               if ( Bus2IP_BE(byte_index) = '1' ) then
                 slv_reg1(byte_index*8+7 downto byte_index*8) <= Bus2IP_Data(byte_index*8+7 downto byte_index*8);
               end if;
             end loop;
+            else
+            slv_reg1 <= slv_reg1;
           when "0010" =>
             for byte_index in 0 to (C_SLV_DWIDTH/8)-1 loop
               if ( Bus2IP_BE(byte_index) = '1' ) then
