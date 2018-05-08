@@ -40,7 +40,7 @@ LIBRARY IEEE;
 USE IEEE.std_logic_1164.ALL;
 USE IEEE.numeric_std.ALL;
 
-ENTITY axi_stream_to_link IS
+ENTITY fsm_stream2link IS
   PORT( clk                               :   IN    std_logic;
         reset                             :   IN    std_logic;
         clk_enable                        :   IN    std_logic;
@@ -54,9 +54,9 @@ ENTITY axi_stream_to_link IS
         LCLK                              :   OUT   std_logic;
         u_TReady                          :   OUT   std_logic
         );
-END axi_stream_to_link;
+END fsm_stream2link;
 
-ARCHITECTURE rtl OF axi_stream_to_link IS
+ARCHITECTURE rtl OF fsm_stream2link IS
 
   -- Component Declarations
   COMPONENT Count_NumbByte

@@ -70,22 +70,26 @@ use ieee.numeric_std.all;
 ------------------------------------------------------------------------------
 
 entity axi4_stream_to_link is
-	port 
-	(
-		-- DO NOT EDIT BELOW THIS LINE ---------------------
-		-- Bus protocol ports, do not add or delete. 
-		ACLK	: in	std_logic;
-		ARESETN	: in	std_logic;
-		S_AXIS_TREADY	: out	std_logic;
-		S_AXIS_TDATA	: in	std_logic_vector(31 downto 0);
-		S_AXIS_TLAST	: in	std_logic;
-		S_AXIS_TVALID	: in	std_logic;
-		-- DO NOT EDIT ABOVE THIS LINE ---------------------
-		-- USER PORTS --
-		LXACK	:	in	std_logic;
-		LXCLK	:	out std_logic;
-		LXDAT	:	out std_logic_vector(7 downto 0)
-	);
+    generic(
+    C_LXDATA_WIDTH      : integer := 8
+    
+    );
+    port 
+    (
+    -- DO NOT EDIT BELOW THIS LINE ---------------------
+    -- Bus protocol ports, do not add or delete. 
+    ACLK            : in    std_logic;
+    ARESETN         : in    std_logic;
+    S_AXIS_TREADY   : out   std_logic;
+    S_AXIS_TDATA    : in    std_logic_vector(31 downto 0);
+    S_AXIS_TLAST    : in    std_logic;
+    S_AXIS_TVALID   : in    std_logic;
+    -- DO NOT EDIT ABOVE THIS LINE ---------------------
+    -- USER PORTS --
+    LXACK           : in    std_logic;
+    LXCLK           : out   std_logic;
+    LXDAT           : out   std_logic_vector(C_LXDATA_WIDTH-1 downto 0)
+    );
 
 attribute SIGIS : string; 
 attribute SIGIS of ACLK : signal is "Clk"; 
