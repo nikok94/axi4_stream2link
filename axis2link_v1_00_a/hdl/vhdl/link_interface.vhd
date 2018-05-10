@@ -52,6 +52,7 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.std_logic_arith.all;
+use ieee.std_logic_unsigned."+";
 use ieee.std_logic_unsigned.all;
 
 library proc_common_v3_00_a;
@@ -87,8 +88,11 @@ entity link_interface is
     -- ADD USER GENERICS BELOW THIS LINE ---------------
     --USER generics added here
     -- ADD USER GENERICS ABOVE THIS LINE ---------------
+    C_FAMILY                       : string               := "spartan6";
+    C_S_AXIS_FIFO_DEPTH            : integer              := 16;
     C_S_AXIS_CLK_FREQ_HZ           : integer              := 100_000_000;
-    C_S_AXIS_TDATA_WIDTH           : integer              := 32
+    C_S_AXIS_TDATA_WIDTH           : integer              := 32;
+
     -- DO NOT EDIT BELOW THIS LINE ---------------------
     -- Bus protocol parameters, do not add to or delete
     C_NUM_REG                      : integer              := 4;
@@ -99,7 +103,18 @@ entity link_interface is
   (
     -- ADD USER PORTS BELOW THIS LINE ------------------
     --USER ports added here
+    aresetn                        : in  std_logic;
+    s_axis_aclk                    : in  std_logic;
+    s_axis_tdata                   : in  std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0) := (others => '0');
+    s_axis_tvalid                  : in  std_logic:= '0';
+    s_axis_tready                  : out std_logic;
+    
+    Lx_DAT                         : out std_logic_vector(7 downto 0);
+    Lx_ACK                         : in std_logic;
+    Lx_CLK                         : out std_logic;
+    
     -- ADD USER PORTS ABOVE THIS LINE ------------------
+    
 
     -- DO NOT EDIT BELOW THIS LINE ---------------------
     -- Bus protocol ports, do not add to or delete
@@ -112,15 +127,8 @@ entity link_interface is
     IP2Bus_Data                    : out std_logic_vector(C_SLV_DWIDTH-1 downto 0);
     IP2Bus_RdAck                   : out std_logic;
     IP2Bus_WrAck                   : out std_logic;
-    IP2Bus_Error                   : out std_logic;
+    IP2Bus_Error                   : out std_logic
     -- DO NOT EDIT ABOVE THIS LINE ---------------------
-    s_axis_tdata                   : in  std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0) := (others => '0');
-    s_axis_tvalid                  : in  std_logic:= '0';
-    s_axis_tready                  : out std_logic;
-    
-    Lx_DAT                         : out std_logic_vector(7 downto 0);
-    Lx_ACK                         : in std_logic;
-    Lx_CLK                         : out std_logic
   );
 
   attribute MAX_FANOUT : string;
@@ -136,14 +144,34 @@ end entity link_interface;
 ------------------------------------------------------------------------------
 
 architecture IMP of link_interface is
-
+  component link_clock_devider is
+    Port ( clk_in       : in std_logic;
+           rst          : in std_logic;
+           devide_in    : in std_logic_vector(31 downto 0);
+           clk_out      : out std_logic
+         );
+    end component link_clock_devider;
+    
+  type LINK_PORT_STATE_TYPE         is  (IDLE, LINK_PORT_ST_RD, READ_STRM_DATA, SEND_BYTE1, SEND_BYTE2, SEND_BYTE3, SEND_BYTE4);
+  signal link_state                     : LINK_PORT_STATE_TYPE;
   --USER signal declarations added here, as needed for user logic
-
+  signal areset                         : std_logic;
+  signal rd_data                        : std_logic;
+  signal fifo_Full                      : std_logic;
+  signal fifo_empty                     : std_logic;
+  signal s_axis_tready_i                : std_logic;
+  signal strm_data_i                    : std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0);
+  signal counter                        : std_logic_vector(31 downto 0);
+  signal clk_dev                        : std_logic:='0';
+  signal fifo_rd_en                     : std_logic:='0';
+  signal Lx_CLK_out                     : std_logic:='0';
+  signal Lx_ACK_i                       : std_logic;
+  signal rd_strm_data                   : std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0);
   ------------------------------------------
   -- Signals for user logic slave model s/w accessible register example
   ------------------------------------------
-  signal slv_reg0                       : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
-  signal slv_reg1                       : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
+  signal init_reg                       : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
+  signal divide                      : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
   signal slv_reg2                       : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
   signal slv_reg3                       : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
   signal slv_reg_write_sel              : std_logic_vector(3 downto 0);
@@ -153,9 +181,135 @@ architecture IMP of link_interface is
   signal slv_write_ack                  : std_logic;
 
 begin
-
+  areset <= aresetn;
+  s_axis_tready_i <= not fifo_Full;
+  Lx_ACK_i <= Lx_ACK;
+  rd_data <= (not fifo_empty) and fifo_rd_en;
+  
+  
   --USER logic implementation added here
-
+    READ_FIFO_DATA_PROC : process (aresetn, clk_dev)
+    begin
+    if aresetn = '0' then
+      rd_strm_data <= (others => '0');
+    elsif clk_dev'event and clk_dev = '1' then
+        if rd_data = '1' then
+          rd_strm_data <= strm_data_i;
+        else
+          rd_strm_data <= rd_strm_data;
+        end if;
+    end if;
+    end process READ_FIFO_DATA_PROC;
+    
+    FREQ_DEV_INST  :  link_clock_devider
+        Port map ( 
+          clk_in     => s_axis_aclk,
+          rst        => areset,
+          devide_in  => divide,
+          clk_out    => clk_dev
+          );
+   
+    I_ASYNC_FIFOGEN_FIFO : entity proc_common_v3_00_a.async_fifo_fg
+       generic map (
+--          C_ALLOW_2N_DEPTH      =>  1,
+          C_ALLOW_2N_DEPTH      =>  0,
+          C_FAMILY              =>  C_FAMILY,
+          C_DATA_WIDTH          =>  C_S_AXIS_TDATA_WIDTH,
+          C_ENABLE_RLOCS        =>  0,
+          C_FIFO_DEPTH          =>  C_S_AXIS_FIFO_DEPTH,
+          C_HAS_ALMOST_EMPTY    =>  1,
+          C_HAS_ALMOST_FULL     =>  1,
+          C_HAS_RD_ACK          =>  0,
+          C_HAS_RD_COUNT        =>  0,
+          C_HAS_RD_ERR          =>  0,
+          C_HAS_WR_ACK          =>  0,
+          C_HAS_WR_COUNT        =>  0,
+          C_HAS_WR_ERR          =>  0,
+          C_RD_ACK_LOW          =>  0,
+          C_RD_COUNT_WIDTH      =>  5,
+          C_RD_ERR_LOW          =>  0,
+          C_USE_BLOCKMEM        =>  0,
+          C_WR_ACK_LOW          =>  0,
+          C_WR_COUNT_WIDTH      =>  5,
+          C_WR_ERR_LOW          =>  0
+         )
+      port Map (
+         Din                 =>  s_axis_tdata,
+         Wr_en               =>  s_axis_tvalid,
+         Wr_clk              =>  s_axis_aclk,
+         Rd_en               =>  rd_data,
+         Rd_clk              =>  clk_dev,
+         Ainit               =>  aresetn,
+         Dout                =>  strm_data_i,
+         Full                =>  fifo_Full,
+         Empty               =>  fifo_empty,
+         Almost_full         =>  open,
+         Almost_empty        =>  open,
+         Wr_count            =>  open,
+         Rd_count            =>  open,
+         Rd_ack              =>  open,
+         Rd_err              =>  open,
+         Wr_ack              =>  open,
+         Wr_err              =>  open 
+        );
+    
+    LINK_ST_PORT_PROCESS   :   process(aresetn,clk_dev)
+    begin
+      if aresetn = '0' then
+        link_state  <=  IDLE;
+        elsif (clk_dev'event and clk_dev = '1') then
+            case link_state is
+              when IDLE => 
+                  link_state <= LINK_PORT_ST_RD;
+              when LINK_PORT_ST_RD => 
+                if Lx_ACK_i = '1' then
+                  link_state <= READ_STRM_DATA;
+                else 
+                  link_state <= LINK_PORT_ST_RD;
+                end if;
+              when READ_STRM_DATA =>
+                if rd_data = '1' then
+                    link_state <= SEND_BYTE1;
+                else 
+                  link_state <= READ_STRM_DATA;
+                end if;
+              when SEND_BYTE1 =>
+                link_state <= SEND_BYTE2;
+              when SEND_BYTE2 =>
+                link_state <= SEND_BYTE3;
+              when SEND_BYTE3 =>
+                link_state <= SEND_BYTE4;
+              when SEND_BYTE4 =>
+                link_state <= IDLE;
+              when others =>
+              link_state <= IDLE;
+            end case;
+      end if;
+    end process LINK_ST_PORT_PROCESS;
+    
+    LINK_PROCESS    :   process (link_state) is
+    begin 
+	   case link_state is
+        when IDLE =>
+          Lx_CLK_out <= '0';
+        when LINK_PORT_ST_RD =>
+          Lx_CLK_out <= '1';
+        when READ_STRM_DATA =>
+          fifo_rd_en <= '1';
+        when SEND_BYTE1 =>
+          fifo_rd_en <= '0';
+          Lx_CLK_out <= clk_dev;
+        when SEND_BYTE2 =>
+          Lx_CLK_out <= clk_dev;
+        when SEND_BYTE3 =>
+          Lx_CLK_out <= clk_dev;
+        when SEND_BYTE4 =>
+          Lx_CLK_out <= clk_dev;
+		  when others =>
+		    Lx_CLK_out <= '0';
+      end case;
+    end process LINK_PROCESS;
+    
   ------------------------------------------
   -- Example code to read/write user logic slave model s/w accessible registers
   -- 
@@ -185,23 +339,24 @@ begin
 
     if Bus2IP_Clk'event and Bus2IP_Clk = '1' then
       if Bus2IP_Resetn = '0' then
-        slv_reg0 <= x"AD05_2018";
-        slv_reg1 <= x"0000_0001";
+        init_reg <= x"AD05_2018"; 
+        divide <= x"0000_0001"; 
         slv_reg2 <= (others => '0');
         slv_reg3 <= (others => '0');
       else
         case slv_reg_write_sel is
           when "1000" =>
-                slv_reg0 <= slv_reg0;
+            init_reg <= init_reg; 
           when "0100" =>
-            if Bus2IP_Data /= x"0000_0000" then
+          if Bus2IP_Data /= x"0000_0000" then 
             for byte_index in 0 to (C_SLV_DWIDTH/8)-1 loop
               if ( Bus2IP_BE(byte_index) = '1' ) then
-                slv_reg1(byte_index*8+7 downto byte_index*8) <= Bus2IP_Data(byte_index*8+7 downto byte_index*8);
+                divide(byte_index*8+7 downto byte_index*8) <= Bus2IP_Data(byte_index*8+7 downto byte_index*8);
               end if;
             end loop;
-            else
-            slv_reg1 <= slv_reg1;
+          else 
+            divide <= divide; 
+          end if;
           when "0010" =>
             for byte_index in 0 to (C_SLV_DWIDTH/8)-1 loop
               if ( Bus2IP_BE(byte_index) = '1' ) then
@@ -222,12 +377,12 @@ begin
   end process SLAVE_REG_WRITE_PROC;
 
   -- implement slave model software accessible register(s) read mux
-  SLAVE_REG_READ_PROC : process( slv_reg_read_sel, slv_reg0, slv_reg1, slv_reg2, slv_reg3 ) is
+  SLAVE_REG_READ_PROC : process( slv_reg_read_sel, init_reg, divide, slv_reg2, slv_reg3 ) is
   begin
 
     case slv_reg_read_sel is
-      when "1000" => slv_ip2bus_data <= slv_reg0;
-      when "0100" => slv_ip2bus_data <= slv_reg1;
+      when "1000" => slv_ip2bus_data <= init_reg;
+      when "0100" => slv_ip2bus_data <= divide;
       when "0010" => slv_ip2bus_data <= slv_reg2;
       when "0001" => slv_ip2bus_data <= slv_reg3;
       when others => slv_ip2bus_data <= (others => '0');

@@ -116,6 +116,9 @@ entity axis2link is
   (
     -- ADD USER GENERICS BELOW THIS LINE ---------------
     --USER generics added here
+    C_S_AXIS_FIFO_DEPTH            : integer              := 16;
+    C_S_AXIS_CLK_FREQ_HZ           : integer              := 100_000_000;
+    C_S_AXIS_TDATA_WIDTH           : integer              := 32;
     -- ADD USER GENERICS ABOVE THIS LINE ---------------
 
     -- DO NOT EDIT BELOW THIS LINE ---------------------
@@ -131,16 +134,24 @@ entity axis2link is
     C_NUM_REG                      : integer              := 1;
     C_NUM_MEM                      : integer              := 1;
     C_SLV_AWIDTH                   : integer              := 32;
-    C_SLV_DWIDTH                   : integer              := 32;
+    C_SLV_DWIDTH                   : integer              := 32
     
-    C_S_AXIS_CLK_FREQ_HZ           : integer              := 100_000_000;
-    C_S_AXIS_TDATA_WIDTH           : integer              := 32
+
     -- DO NOT EDIT ABOVE THIS LINE ---------------------
   );
   port
   (
     -- ADD USER PORTS BELOW THIS LINE ------------------
     --USER ports added here
+    aresetn                        : in  std_logic;
+    s_axis_aclk                    : in  std_logic;
+    s_axis_tdata                   : in  std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0) := (others => '0');
+    s_axis_tvalid                  : in  std_logic:= '0';
+    s_axis_tready                  : out std_logic;
+    
+    Lx_DAT                         : out std_logic_vector(7 downto 0);
+    Lx_ACK                         : in std_logic;
+    Lx_CLK                         : out std_logic;
     -- ADD USER PORTS ABOVE THIS LINE ------------------
 
     -- DO NOT EDIT BELOW THIS LINE ---------------------
@@ -163,15 +174,9 @@ entity axis2link is
     S_AXI_WREADY                   : out std_logic;
     S_AXI_BRESP                    : out std_logic_vector(1 downto 0);
     S_AXI_BVALID                   : out std_logic;
-    S_AXI_AWREADY                  : out std_logic;
+    S_AXI_AWREADY                  : out std_logic
     -- DO NOT EDIT ABOVE THIS LINE ---------------------
-    s_axis_tdata                   : in  std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0) := (others => '0');
-    s_axis_tvalid                  : in  std_logic:= '0';
-    s_axis_tready                  : out std_logic;
-    
-    Lx_DAT                         : out std_logic_vector(7 downto 0);
-    Lx_ACK                         : in std_logic;
-    Lx_CLK                         : out std_logic
+
   );
 
   attribute MAX_FANOUT : string;
@@ -303,9 +308,11 @@ begin
     (
       -- MAP USER GENERICS BELOW THIS LINE ---------------
       --USER generics mapped here
-      -- MAP USER GENERICS ABOVE THIS LINE ---------------
+      C_FAMILY                       => C_FAMILY,
       C_S_AXIS_CLK_FREQ_HZ           => C_S_AXIS_CLK_FREQ_HZ,
       C_S_AXIS_TDATA_WIDTH           => C_S_AXIS_TDATA_WIDTH,
+      C_S_AXIS_FIFO_DEPTH            => C_S_AXIS_FIFO_DEPTH,
+      -- MAP USER GENERICS ABOVE THIS LINE ---------------
       C_NUM_REG                      => USER_NUM_REG,
       C_SLV_DWIDTH                   => USER_SLV_DWIDTH
     )
@@ -313,6 +320,14 @@ begin
     (
       -- MAP USER PORTS BELOW THIS LINE ------------------
       --USER ports mapped here
+      aresetn                        => aresetn,
+      s_axis_aclk                    => s_axis_aclk,
+      s_axis_tdata                   => s_axis_tdata,
+      s_axis_tvalid                  => s_axis_tvalid,
+      s_axis_tready                  => s_axis_tready,
+      Lx_DAT                         => Lx_DAT,
+      Lx_ACK                         => Lx_ACK,
+      Lx_CLK                         => Lx_CLK,
       -- MAP USER PORTS ABOVE THIS LINE ------------------
 
       Bus2IP_Clk                     => ipif_Bus2IP_Clk,
@@ -324,14 +339,9 @@ begin
       IP2Bus_Data                    => user_IP2Bus_Data,
       IP2Bus_RdAck                   => user_IP2Bus_RdAck,
       IP2Bus_WrAck                   => user_IP2Bus_WrAck,
-      IP2Bus_Error                   => user_IP2Bus_Error,
+      IP2Bus_Error                   => user_IP2Bus_Error
       
-      s_axis_tdata                   => s_axis_tdata,
-      s_axis_tvalid                  => s_axis_tvalid,
-      s_axis_tready                  => s_axis_tready,
-      Lx_DAT                         => Lx_DAT,
-      Lx_ACK                         => Lx_ACK,
-      Lx_CLK                         => Lx_CLK
+
       
     );
 
