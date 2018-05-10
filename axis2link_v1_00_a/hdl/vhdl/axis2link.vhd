@@ -8,7 +8,7 @@
 --
 -- TYPICALLY, THE ONLY ACCEPTABLE CHANGES INVOLVE ADDING NEW
 -- PORTS AND GENERICS THAT GET PASSED THROUGH TO THE INSTANTIATION
--- OF THE USER_LOGIC ENTITY.
+-- OF THE link_interface ENTITY.
 ------------------------------------------------------------------------------
 --
 -- ***************************************************************************
@@ -70,7 +70,7 @@ library axi_lite_ipif_v1_01_a;
 use axi_lite_ipif_v1_01_a.axi_lite_ipif;
 
 library axis2link_v1_00_a;
-use axis2link_v1_00_a.user_logic;
+use axis2link_v1_00_a.link_interface;
 
 ------------------------------------------------------------------------------
 -- Entity section
@@ -131,7 +131,10 @@ entity axis2link is
     C_NUM_REG                      : integer              := 1;
     C_NUM_MEM                      : integer              := 1;
     C_SLV_AWIDTH                   : integer              := 32;
-    C_SLV_DWIDTH                   : integer              := 32
+    C_SLV_DWIDTH                   : integer              := 32;
+    
+    C_S_AXIS_CLK_FREQ_HZ           : integer              := 100_000_000;
+    C_S_AXIS_TDATA_WIDTH           : integer              := 32
     -- DO NOT EDIT ABOVE THIS LINE ---------------------
   );
   port
@@ -160,16 +163,23 @@ entity axis2link is
     S_AXI_WREADY                   : out std_logic;
     S_AXI_BRESP                    : out std_logic_vector(1 downto 0);
     S_AXI_BVALID                   : out std_logic;
-    S_AXI_AWREADY                  : out std_logic
+    S_AXI_AWREADY                  : out std_logic;
     -- DO NOT EDIT ABOVE THIS LINE ---------------------
+    s_axis_tdata                   : in  std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0) := (others => '0');
+    s_axis_tvalid                  : in  std_logic:= '0';
+    s_axis_tready                  : out std_logic;
+    
+    Lx_DAT                         : out std_logic_vector(7 downto 0);
+    Lx_ACK                         : in std_logic;
+    Lx_CLK                         : out std_logic
   );
 
   attribute MAX_FANOUT : string;
   attribute SIGIS : string;
-  attribute MAX_FANOUT of S_AXI_ACLK       : signal is "10000";
-  attribute MAX_FANOUT of S_AXI_ARESETN       : signal is "10000";
-  attribute SIGIS of S_AXI_ACLK       : signal is "Clk";
-  attribute SIGIS of S_AXI_ARESETN       : signal is "Rst";
+  attribute MAX_FANOUT of S_AXI_ACLK        : signal is "10000";
+  attribute MAX_FANOUT of S_AXI_ARESETN     : signal is "10000";
+  attribute SIGIS of S_AXI_ACLK             : signal is "Clk";
+  attribute SIGIS of S_AXI_ARESETN          : signal is "Rst";
 end entity axis2link;
 
 ------------------------------------------------------------------------------
@@ -288,13 +298,14 @@ begin
   ------------------------------------------
   -- instantiate User Logic
   ------------------------------------------
-  USER_LOGIC_I : entity axis2link_v1_00_a.user_logic
+  link_interface_I : entity axis2link_v1_00_a.link_interface
     generic map
     (
       -- MAP USER GENERICS BELOW THIS LINE ---------------
       --USER generics mapped here
       -- MAP USER GENERICS ABOVE THIS LINE ---------------
-
+      C_S_AXIS_CLK_FREQ_HZ           => C_S_AXIS_CLK_FREQ_HZ,
+      C_S_AXIS_TDATA_WIDTH           => C_S_AXIS_TDATA_WIDTH,
       C_NUM_REG                      => USER_NUM_REG,
       C_SLV_DWIDTH                   => USER_SLV_DWIDTH
     )
@@ -313,7 +324,15 @@ begin
       IP2Bus_Data                    => user_IP2Bus_Data,
       IP2Bus_RdAck                   => user_IP2Bus_RdAck,
       IP2Bus_WrAck                   => user_IP2Bus_WrAck,
-      IP2Bus_Error                   => user_IP2Bus_Error
+      IP2Bus_Error                   => user_IP2Bus_Error,
+      
+      s_axis_tdata                   => s_axis_tdata,
+      s_axis_tvalid                  => s_axis_tvalid,
+      s_axis_tready                  => s_axis_tready,
+      Lx_DAT                         => Lx_DAT,
+      Lx_ACK                         => Lx_ACK,
+      Lx_CLK                         => Lx_CLK
+      
     );
 
   ------------------------------------------
