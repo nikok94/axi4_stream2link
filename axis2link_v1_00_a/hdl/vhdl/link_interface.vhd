@@ -144,7 +144,21 @@ end entity link_interface;
 ------------------------------------------------------------------------------
 
 architecture IMP of link_interface is
-  component link_clock_devider is
+    component axis_fifo32 IS
+    PORT (
+        m_aclk : IN STD_LOGIC;
+        s_aclk : IN STD_LOGIC;
+        s_aresetn : IN STD_LOGIC;
+        s_axis_tvalid : IN STD_LOGIC;
+        s_axis_tready : OUT STD_LOGIC;
+        s_axis_tdata : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+        m_axis_tvalid : OUT STD_LOGIC;
+        m_axis_tready : IN STD_LOGIC;
+        m_axis_tdata : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
+    );
+    END component axis_fifo32;
+
+    component link_clock_devider is
     Port ( clk_in       : in std_logic;
            rst          : in std_logic;
            devide_in    : in std_logic_vector(31 downto 0);
@@ -158,20 +172,22 @@ architecture IMP of link_interface is
   signal areset                         : std_logic;
   signal rd_data                        : std_logic;
   signal fifo_Full                      : std_logic;
-  signal fifo_empty                     : std_logic;
-  signal s_axis_tready_i                : std_logic;
+  signal fifo_tvalid                    : std_logic;
   signal strm_data_i                    : std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0);
   signal counter                        : std_logic_vector(31 downto 0);
   signal clk_dev                        : std_logic:='0';
   signal fifo_rd_en                     : std_logic:='0';
-  signal Lx_CLK_out                     : std_logic:='0';
+  signal Lx_DAT_out                     : std_logic_vector(7 downto 0):= x"00";
+  --signal Lx_CLK_out                     : std_logic:='0';
   signal Lx_ACK_i                       : std_logic;
   signal rd_strm_data                   : std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0);
+  signal send_link_data                 : std_logic;
+  signal status_link_up                 : std_logic;
   ------------------------------------------
   -- Signals for user logic slave model s/w accessible register example
   ------------------------------------------
   signal init_reg                       : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
-  signal divide                      : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
+  signal divide                         : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
   signal slv_reg2                       : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
   signal slv_reg3                       : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
   signal slv_reg_write_sel              : std_logic_vector(3 downto 0);
@@ -181,10 +197,12 @@ architecture IMP of link_interface is
   signal slv_write_ack                  : std_logic;
 
 begin
-  areset <= aresetn;
-  s_axis_tready_i <= not fifo_Full;
+  Lx_CLK <= clk_dev when ((status_link_up and send_link_data) = '1') else 
+            '1' when (status_link_up and (not send_link_data)) = '1' else '0';
+  areset <= not aresetn;
+  Lx_DAT  <= Lx_DAT_out;
   Lx_ACK_i <= Lx_ACK;
-  rd_data <= (not fifo_empty) and fifo_rd_en;
+  rd_data <= fifo_tvalid and fifo_rd_en;
   
   
   --USER logic implementation added here
@@ -208,50 +226,63 @@ begin
           devide_in  => divide,
           clk_out    => clk_dev
           );
-   
-    I_ASYNC_FIFOGEN_FIFO : entity proc_common_v3_00_a.async_fifo_fg
-       generic map (
---          C_ALLOW_2N_DEPTH      =>  1,
-          C_ALLOW_2N_DEPTH      =>  0,
-          C_FAMILY              =>  C_FAMILY,
-          C_DATA_WIDTH          =>  C_S_AXIS_TDATA_WIDTH,
-          C_ENABLE_RLOCS        =>  0,
-          C_FIFO_DEPTH          =>  C_S_AXIS_FIFO_DEPTH,
-          C_HAS_ALMOST_EMPTY    =>  1,
-          C_HAS_ALMOST_FULL     =>  1,
-          C_HAS_RD_ACK          =>  0,
-          C_HAS_RD_COUNT        =>  0,
-          C_HAS_RD_ERR          =>  0,
-          C_HAS_WR_ACK          =>  0,
-          C_HAS_WR_COUNT        =>  0,
-          C_HAS_WR_ERR          =>  0,
-          C_RD_ACK_LOW          =>  0,
-          C_RD_COUNT_WIDTH      =>  5,
-          C_RD_ERR_LOW          =>  0,
-          C_USE_BLOCKMEM        =>  0,
-          C_WR_ACK_LOW          =>  0,
-          C_WR_COUNT_WIDTH      =>  5,
-          C_WR_ERR_LOW          =>  0
-         )
-      port Map (
-         Din                 =>  s_axis_tdata,
-         Wr_en               =>  s_axis_tvalid,
-         Wr_clk              =>  s_axis_aclk,
-         Rd_en               =>  rd_data,
-         Rd_clk              =>  clk_dev,
-         Ainit               =>  aresetn,
-         Dout                =>  strm_data_i,
-         Full                =>  fifo_Full,
-         Empty               =>  fifo_empty,
-         Almost_full         =>  open,
-         Almost_empty        =>  open,
-         Wr_count            =>  open,
-         Rd_count            =>  open,
-         Rd_ack              =>  open,
-         Rd_err              =>  open,
-         Wr_ack              =>  open,
-         Wr_err              =>  open 
-        );
+
+    STREAM_FIFO_INST : axis_fifo32
+    PORT MAP(
+        m_aclk          => clk_dev,
+        s_aclk          => s_axis_aclk,
+        s_aresetn       => aresetn,
+        s_axis_tvalid   => s_axis_tvalid,
+        s_axis_tready   => s_axis_tready,
+        s_axis_tdata    => s_axis_tdata,
+        m_axis_tvalid   => fifo_tvalid,
+        m_axis_tready   => rd_data,
+        m_axis_tdata    => strm_data_i
+    );
+    
+--    I_ASYNC_FIFOGEN_FIFO : entity proc_common_v3_00_a.async_fifo_fg
+--       generic map (
+----          C_ALLOW_2N_DEPTH      =>  1,
+--          C_ALLOW_2N_DEPTH      =>  0,
+--          C_FAMILY              =>  C_FAMILY,
+--          C_DATA_WIDTH          =>  C_S_AXIS_TDATA_WIDTH,
+--          C_ENABLE_RLOCS        =>  0,
+--          C_FIFO_DEPTH          =>  C_S_AXIS_FIFO_DEPTH,
+--          C_HAS_ALMOST_EMPTY    =>  1,
+--          C_HAS_ALMOST_FULL     =>  1,
+--          C_HAS_RD_ACK          =>  0,
+--          C_HAS_RD_COUNT        =>  0,
+--          C_HAS_RD_ERR          =>  0,
+--          C_HAS_WR_ACK          =>  0,
+--          C_HAS_WR_COUNT        =>  0,
+--          C_HAS_WR_ERR          =>  0,
+--          C_RD_ACK_LOW          =>  0,
+--          C_RD_COUNT_WIDTH      =>  0,
+--          C_RD_ERR_LOW          =>  0,
+--          C_USE_BLOCKMEM        =>  0,
+--          C_WR_ACK_LOW          =>  0,
+--          C_WR_COUNT_WIDTH      =>  0,
+--          C_WR_ERR_LOW          =>  0
+--         )
+--      port Map (
+--         Din                 =>  s_axis_tdata,
+--         Wr_en               =>  s_axis_tvalid,
+--         Wr_clk              =>  s_axis_aclk,
+--         Rd_en               =>  rd_data,
+--         Rd_clk              =>  clk_dev,
+--         Ainit               =>  aresetn,
+--         Dout                =>  strm_data_i,
+--         Full                =>  fifo_Full,
+--         Empty               =>  fifo_empty,
+--         Almost_full         =>  open,
+--         Almost_empty        =>  open,
+--         Wr_count            =>  open,
+--         Rd_count            =>  open,
+--         Rd_ack              =>  open,
+--         Rd_err              =>  open,
+--         Wr_ack              =>  open,
+--         Wr_err              =>  open 
+--        );
     
     LINK_ST_PORT_PROCESS   :   process(aresetn,clk_dev)
     begin
@@ -280,7 +311,7 @@ begin
               when SEND_BYTE3 =>
                 link_state <= SEND_BYTE4;
               when SEND_BYTE4 =>
-                link_state <= IDLE;
+                link_state <= LINK_PORT_ST_RD;
               when others =>
               link_state <= IDLE;
             end case;
@@ -291,22 +322,26 @@ begin
     begin 
 	   case link_state is
         when IDLE =>
-          Lx_CLK_out <= '0';
+          send_link_data <= '0';
+          status_link_up <= '0';
         when LINK_PORT_ST_RD =>
-          Lx_CLK_out <= '1';
+          send_link_data <= '0';
+          status_link_up <= '1';
         when READ_STRM_DATA =>
           fifo_rd_en <= '1';
         when SEND_BYTE1 =>
+          send_link_data <= '1';
+          Lx_DAT_out <= rd_strm_data(31 downto 24);
           fifo_rd_en <= '0';
-          Lx_CLK_out <= clk_dev;
         when SEND_BYTE2 =>
-          Lx_CLK_out <= clk_dev;
+          Lx_DAT_out <= rd_strm_data(23 downto 16);
         when SEND_BYTE3 =>
-          Lx_CLK_out <= clk_dev;
+          Lx_DAT_out <= rd_strm_data(15 downto 8);
         when SEND_BYTE4 =>
-          Lx_CLK_out <= clk_dev;
-		  when others =>
-		    Lx_CLK_out <= '0';
+          Lx_DAT_out <= rd_strm_data(7 downto 0);
+        when others =>
+          send_link_data <= '0';
+          status_link_up <= '0';
       end case;
     end process LINK_PROCESS;
     
