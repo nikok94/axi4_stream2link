@@ -144,45 +144,25 @@ end entity link_interface;
 ------------------------------------------------------------------------------
 
 architecture IMP of link_interface is
-    component axis_fifo32 IS
-    PORT (
-        m_aclk : IN STD_LOGIC;
-        s_aclk : IN STD_LOGIC;
-        s_aresetn : IN STD_LOGIC;
-        s_axis_tvalid : IN STD_LOGIC;
-        s_axis_tready : OUT STD_LOGIC;
-        s_axis_tdata : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-        m_axis_tvalid : OUT STD_LOGIC;
-        m_axis_tready : IN STD_LOGIC;
-        m_axis_tdata : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
-    );
-    END component axis_fifo32;
-
-    component link_clock_devider is
-    Port ( clk_in       : in std_logic;
-           rst          : in std_logic;
-           devide_in    : in std_logic_vector(31 downto 0);
-           clk_out      : out std_logic
-         );
-    end component link_clock_devider;
     
-  type LINK_PORT_STATE_TYPE         is  (IDLE, LINK_PORT_ST_RD, READ_STRM_DATA, SEND_BYTE1, SEND_BYTE2, SEND_BYTE3, SEND_BYTE4);
+  type LINK_PORT_STATE_TYPE         is  (IDLE, LINK_PORT_ST_RD, READ_STRM_DATA, SEND_BYTE1_p, SEND_BYTE2_p, SEND_BYTE3_p, SEND_BYTE4_p,
+                                        SEND_BYTE1_n, SEND_BYTE2_n, SEND_BYTE3_n, SEND_BYTE4_n);
   signal link_state                     : LINK_PORT_STATE_TYPE;
   --USER signal declarations added here, as needed for user logic
   signal areset                         : std_logic;
+  signal fifo_wr_en                     : std_logic;
   signal rd_data                        : std_logic;
-  signal fifo_Full                      : std_logic;
-  signal fifo_tvalid                    : std_logic;
-  signal strm_data_i                    : std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0);
+  signal s_axis_tready_o                : std_logic:= '0';
   signal counter                        : std_logic_vector(31 downto 0);
   signal clk_dev                        : std_logic:='0';
-  signal fifo_rd_en                     : std_logic:='0';
   signal Lx_DAT_out                     : std_logic_vector(7 downto 0):= x"00";
-  --signal Lx_CLK_out                     : std_logic:='0';
+  signal Lx_CLK_out                     : std_logic:='0';
   signal Lx_ACK_i                       : std_logic;
   signal rd_strm_data                   : std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0);
   signal send_link_data                 : std_logic;
   signal status_link_up                 : std_logic;
+  signal send_lnk_data_count            : std_logic_vector(32-1 downto 0):= x"0000_0000";
+  signal tresh_phase                    : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
   ------------------------------------------
   -- Signals for user logic slave model s/w accessible register example
   ------------------------------------------
@@ -197,121 +177,141 @@ architecture IMP of link_interface is
   signal slv_write_ack                  : std_logic;
 
 begin
-  Lx_CLK <= clk_dev when ((status_link_up and send_link_data) = '1') else 
-            '1' when (status_link_up and (not send_link_data)) = '1' else '0';
+  Lx_CLK <= Lx_CLK_out when ((status_link_up and send_link_data) = '1') else 
+            '1' when ((status_link_up and (not send_link_data)) = '1') else '0';
+  Lx_CLK_out <= s_axis_aclk when divide = x"0000_0001" else clk_dev;
   areset <= not aresetn;
   Lx_DAT  <= Lx_DAT_out;
   Lx_ACK_i <= Lx_ACK;
-  rd_data <= fifo_tvalid and fifo_rd_en;
+  --rd_data <= s_axis_tvalid and s_axis_tready_o;
+ -- s_axis_tready <= s_axis_tready_o;
+  tresh_phase <=('0' & divide(C_SLV_DWIDTH-1 downto 1)) - x"0000_0001";
   
+  
+  TREADY_PROC : process (aresetn, s_axis_aclk)
+  begin
+    if aresetn = '0' then
+      s_axis_tready <= '0';
+    elsif s_axis_aclk'event and s_axis_aclk = '1' then
+        if s_axis_tready_o = '1' then
+          s_axis_tready <= '1';
+        else
+          s_axis_tready <= '0';
+        end if;
+    end if;
+    end process TREADY_PROC;
   
   --USER logic implementation added here
-    READ_FIFO_DATA_PROC : process (aresetn, clk_dev)
+    READ_FIFO_DATA_PROC : process (aresetn, s_axis_aclk)
     begin
     if aresetn = '0' then
       rd_strm_data <= (others => '0');
-    elsif clk_dev'event and clk_dev = '1' then
-        if rd_data = '1' then
-          rd_strm_data <= strm_data_i;
+    elsif s_axis_aclk'event and s_axis_aclk = '1' then
+        if s_axis_tready_o = '1' then
+          rd_strm_data <= s_axis_tdata;
         else
           rd_strm_data <= rd_strm_data;
         end if;
     end if;
     end process READ_FIFO_DATA_PROC;
-    
-    FREQ_DEV_INST  :  link_clock_devider
-        Port map ( 
-          clk_in     => s_axis_aclk,
-          rst        => areset,
-          devide_in  => divide,
-          clk_out    => clk_dev
-          );
 
-    STREAM_FIFO_INST : axis_fifo32
-    PORT MAP(
-        m_aclk          => clk_dev,
-        s_aclk          => s_axis_aclk,
-        s_aresetn       => aresetn,
-        s_axis_tvalid   => s_axis_tvalid,
-        s_axis_tready   => s_axis_tready,
-        s_axis_tdata    => s_axis_tdata,
-        m_axis_tvalid   => fifo_tvalid,
-        m_axis_tready   => rd_data,
-        m_axis_tdata    => strm_data_i
-    );
-    
---    I_ASYNC_FIFOGEN_FIFO : entity proc_common_v3_00_a.async_fifo_fg
---       generic map (
-----          C_ALLOW_2N_DEPTH      =>  1,
---          C_ALLOW_2N_DEPTH      =>  0,
---          C_FAMILY              =>  C_FAMILY,
---          C_DATA_WIDTH          =>  C_S_AXIS_TDATA_WIDTH,
---          C_ENABLE_RLOCS        =>  0,
---          C_FIFO_DEPTH          =>  C_S_AXIS_FIFO_DEPTH,
---          C_HAS_ALMOST_EMPTY    =>  1,
---          C_HAS_ALMOST_FULL     =>  1,
---          C_HAS_RD_ACK          =>  0,
---          C_HAS_RD_COUNT        =>  0,
---          C_HAS_RD_ERR          =>  0,
---          C_HAS_WR_ACK          =>  0,
---          C_HAS_WR_COUNT        =>  0,
---          C_HAS_WR_ERR          =>  0,
---          C_RD_ACK_LOW          =>  0,
---          C_RD_COUNT_WIDTH      =>  0,
---          C_RD_ERR_LOW          =>  0,
---          C_USE_BLOCKMEM        =>  0,
---          C_WR_ACK_LOW          =>  0,
---          C_WR_COUNT_WIDTH      =>  0,
---          C_WR_ERR_LOW          =>  0
---         )
---      port Map (
---         Din                 =>  s_axis_tdata,
---         Wr_en               =>  s_axis_tvalid,
---         Wr_clk              =>  s_axis_aclk,
---         Rd_en               =>  rd_data,
---         Rd_clk              =>  clk_dev,
---         Ainit               =>  aresetn,
---         Dout                =>  strm_data_i,
---         Full                =>  fifo_Full,
---         Empty               =>  fifo_empty,
---         Almost_full         =>  open,
---         Almost_empty        =>  open,
---         Wr_count            =>  open,
---         Rd_count            =>  open,
---         Rd_ack              =>  open,
---         Rd_err              =>  open,
---         Wr_ack              =>  open,
---         Wr_err              =>  open 
---        );
-    
-    LINK_ST_PORT_PROCESS   :   process(aresetn,clk_dev)
+    LINK_ST_PORT_PROCESS   :   process(aresetn,s_axis_aclk)
     begin
       if aresetn = '0' then
         link_state  <=  IDLE;
-        elsif (clk_dev'event and clk_dev = '1') then
+        elsif (s_axis_aclk'event and s_axis_aclk = '1') then
             case link_state is
               when IDLE => 
                   link_state <= LINK_PORT_ST_RD;
               when LINK_PORT_ST_RD => 
-                if Lx_ACK_i = '1' then
+                if ((Lx_ACK_i = '1') and (s_axis_tvalid = '1')) then
                   link_state <= READ_STRM_DATA;
                 else 
                   link_state <= LINK_PORT_ST_RD;
                 end if;
               when READ_STRM_DATA =>
-                if rd_data = '1' then
-                    link_state <= SEND_BYTE1;
+                  send_lnk_data_count <= x"0000_0000";
+                  link_state <= SEND_BYTE1_p;
+              when SEND_BYTE1_p =>
+                if divide = x"0000_0001" then 
+                link_state <= SEND_BYTE2_p;
+                elsif send_lnk_data_count = tresh_phase then
+                send_lnk_data_count <= x"0000_0000";
+                link_state <= SEND_BYTE1_n;
                 else 
-                  link_state <= READ_STRM_DATA;
+                link_state <= SEND_BYTE1_p;
+                send_lnk_data_count <= send_lnk_data_count + x"0000_0001";
                 end if;
-              when SEND_BYTE1 =>
-                link_state <= SEND_BYTE2;
-              when SEND_BYTE2 =>
-                link_state <= SEND_BYTE3;
-              when SEND_BYTE3 =>
-                link_state <= SEND_BYTE4;
-              when SEND_BYTE4 =>
+              when SEND_BYTE1_n =>
+                if divide = x"0000_0001" then 
+                link_state <= SEND_BYTE2_p;
+                elsif send_lnk_data_count = tresh_phase then
+                send_lnk_data_count <= x"0000_0000";
+                link_state <= SEND_BYTE2_p;
+                else 
+                link_state <= SEND_BYTE1_n;
+                send_lnk_data_count <= send_lnk_data_count + x"0000_0001";
+                end if;
+              when SEND_BYTE2_p =>
+                if divide = x"0000_0001" then 
+                link_state <= SEND_BYTE3_p;
+                elsif send_lnk_data_count = tresh_phase then
+                send_lnk_data_count <= x"0000_0000";
+                link_state <= SEND_BYTE2_n;
+                else 
+                link_state <= SEND_BYTE2_p;
+                send_lnk_data_count <= send_lnk_data_count + x"0000_0001";
+                end if;
+              when SEND_BYTE2_n =>
+                if divide = x"0000_0001" then 
+                link_state <= SEND_BYTE3_p;
+                elsif send_lnk_data_count = tresh_phase then
+                send_lnk_data_count <= x"0000_0000";
+                link_state <= SEND_BYTE3_p;
+                else 
+                link_state <= SEND_BYTE2_n;
+                send_lnk_data_count <= send_lnk_data_count + x"0000_0001";
+                end if;
+              when SEND_BYTE3_p =>
+                if divide = x"0000_0001" then 
+                link_state <= SEND_BYTE4_p;
+                elsif send_lnk_data_count = tresh_phase then
+                send_lnk_data_count <= x"0000_0000";
+                link_state <= SEND_BYTE4_n;
+                else 
+                link_state <= SEND_BYTE3_p;
+                send_lnk_data_count <= send_lnk_data_count + x"0000_0001";
+                end if;
+              when SEND_BYTE3_n =>
+                if divide = x"0000_0001" then 
+                link_state <= SEND_BYTE4_p;
+                elsif send_lnk_data_count = tresh_phase then
+                send_lnk_data_count <= x"0000_0000";
+                link_state <= SEND_BYTE4_p;
+                else 
+                link_state <= SEND_BYTE3_n;
+                send_lnk_data_count <= send_lnk_data_count + x"0000_0001";
+                end if;
+              when SEND_BYTE4_p =>
+                if divide = x"0000_0001" then 
                 link_state <= LINK_PORT_ST_RD;
+                elsif send_lnk_data_count = tresh_phase then
+                send_lnk_data_count <= x"0000_0000";
+                link_state <= SEND_BYTE4_n;
+                else 
+                link_state <= SEND_BYTE4_p;
+                send_lnk_data_count <= send_lnk_data_count + x"0000_0001";
+                end if;
+              when SEND_BYTE4_n =>
+                if divide = x"0000_0001" then 
+                link_state <= LINK_PORT_ST_RD;
+                elsif send_lnk_data_count = tresh_phase then
+                send_lnk_data_count <= x"0000_0000";
+                link_state <= LINK_PORT_ST_RD;
+                else 
+                link_state <= SEND_BYTE4_n;
+                send_lnk_data_count <= send_lnk_data_count + x"0000_0001";
+                end if;
               when others =>
               link_state <= IDLE;
             end case;
@@ -328,16 +328,34 @@ begin
           send_link_data <= '0';
           status_link_up <= '1';
         when READ_STRM_DATA =>
-          fifo_rd_en <= '1';
-        when SEND_BYTE1 =>
+          s_axis_tready_o <= '1';
+        when SEND_BYTE1_p =>
           send_link_data <= '1';
+          clk_dev <= '1';
           Lx_DAT_out <= rd_strm_data(31 downto 24);
-          fifo_rd_en <= '0';
-        when SEND_BYTE2 =>
+          s_axis_tready_o <= '0';
+        when SEND_BYTE1_n =>
+          send_link_data <= '1';
+          clk_dev <= '0';
+          Lx_DAT_out <= rd_strm_data(31 downto 24);
+          s_axis_tready_o <= '0';
+        when SEND_BYTE2_p =>
+          clk_dev <= '1';
           Lx_DAT_out <= rd_strm_data(23 downto 16);
-        when SEND_BYTE3 =>
+        when SEND_BYTE2_n =>
+          clk_dev <= '0';
+          Lx_DAT_out <= rd_strm_data(23 downto 16);
+        when SEND_BYTE3_p =>
+          clk_dev <= '1';
           Lx_DAT_out <= rd_strm_data(15 downto 8);
-        when SEND_BYTE4 =>
+        when SEND_BYTE3_n =>
+          clk_dev <= '0';
+          Lx_DAT_out <= rd_strm_data(15 downto 8);
+        when SEND_BYTE4_p =>
+          clk_dev <= '1';
+          Lx_DAT_out <= rd_strm_data(7 downto 0);
+        when SEND_BYTE4_n =>
+          clk_dev <= '0';
           Lx_DAT_out <= rd_strm_data(7 downto 0);
         when others =>
           send_link_data <= '0';
