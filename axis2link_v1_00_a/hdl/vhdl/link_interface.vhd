@@ -55,6 +55,9 @@ use ieee.std_logic_arith.all;
 use ieee.std_logic_unsigned."+";
 use ieee.std_logic_unsigned.all;
 
+Library UNISIM;
+use UNISIM.vcomponents.all;
+
 library proc_common_v3_00_a;
 use proc_common_v3_00_a.proc_common_pkg.all;
 
@@ -89,7 +92,6 @@ entity link_interface is
     --USER generics added here
     -- ADD USER GENERICS ABOVE THIS LINE ---------------
     C_FAMILY                       : string               := "spartan6";
-    C_S_AXIS_FIFO_DEPTH            : integer              := 16;
     C_S_AXIS_CLK_FREQ_HZ           : integer              := 100_000_000;
     C_S_AXIS_TDATA_WIDTH           : integer              := 32;
 
@@ -108,6 +110,9 @@ entity link_interface is
     s_axis_tdata                   : in  std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0) := (others => '0');
     s_axis_tvalid                  : in  std_logic:= '0';
     s_axis_tready                  : out std_logic;
+    
+    axis_clk_2x                    : in std_logic;
+    axis_clk_2x_180                : in std_logic;
     
     Lx_DAT                         : out std_logic_vector(7 downto 0);
     Lx_ACK                         : in std_logic;
@@ -145,29 +150,31 @@ end entity link_interface;
 
 architecture IMP of link_interface is
     
-  type LINK_PORT_STATE_TYPE         is  (IDLE, LINK_PORT_ST_RD, READ_STRM_DATA, SEND_BYTE1_p, SEND_BYTE2_p, SEND_BYTE3_p, SEND_BYTE4_p,
-                                        SEND_BYTE1_n, SEND_BYTE2_n, SEND_BYTE3_n, SEND_BYTE4_n);
+  type LINK_PORT_STATE_TYPE         is  (IDLE, LINK_PORT_ST_RD, READ_STRM_DATA, SEND_BYTE1, SEND_BYTE2, SEND_BYTE3, SEND_BYTE4);
   signal link_state                     : LINK_PORT_STATE_TYPE;
   --USER signal declarations added here, as needed for user logic
-  signal areset                         : std_logic;
-  signal fifo_wr_en                     : std_logic;
-  signal rd_data                        : std_logic;
-  signal s_axis_tready_o                : std_logic:= '0';
-  signal counter                        : std_logic_vector(31 downto 0);
+  signal clk_counter                    : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
+  signal divide                         : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
+  signal link_rst                       : std_logic;
   signal clk_dev                        : std_logic:='0';
+  signal clk_dev_n                      : std_logic:='1';
+  signal link_clk                       : std_logic:='0';
+  signal tready_ind                     : std_logic;
+  
+  signal tready                         : std_logic:= '0';
+  
+  signal strm_data_rd_en                : std_logic:= '0';
+  
+  signal send_link_data                 : std_logic:= '0';
+  signal Lx_CLK_out                     : std_logic:= '0';
   signal Lx_DAT_out                     : std_logic_vector(7 downto 0):= x"00";
-  signal Lx_CLK_out                     : std_logic:='0';
   signal Lx_ACK_i                       : std_logic;
-  signal rd_strm_data                   : std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0);
-  signal send_link_data                 : std_logic;
-  signal status_link_up                 : std_logic;
-  signal send_lnk_data_count            : std_logic_vector(32-1 downto 0):= x"0000_0000";
-  signal tresh_phase                    : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
+  signal rd_strm_data                   : std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0):= x"0000_0000";
   ------------------------------------------
   -- Signals for user logic slave model s/w accessible register example
   ------------------------------------------
   signal init_reg                       : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
-  signal divide                         : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
+  
   signal slv_reg2                       : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
   signal slv_reg3                       : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
   signal slv_reg_write_sel              : std_logic_vector(3 downto 0);
@@ -177,49 +184,92 @@ architecture IMP of link_interface is
   signal slv_write_ack                  : std_logic;
 
 begin
-  Lx_CLK <= Lx_CLK_out when ((status_link_up and send_link_data) = '1') else 
-            '1' when ((status_link_up and (not send_link_data)) = '1') else '0';
-  Lx_CLK_out <= s_axis_aclk when divide = x"0000_0001" else clk_dev;
-  areset <= not aresetn;
-  Lx_DAT  <= Lx_DAT_out;
   Lx_ACK_i <= Lx_ACK;
-  --rd_data <= s_axis_tvalid and s_axis_tready_o;
- -- s_axis_tready <= s_axis_tready_o;
-  tresh_phase <=('0' & divide(C_SLV_DWIDTH-1 downto 1)) - x"0000_0001";
-  
-  
-  TREADY_PROC : process (aresetn, s_axis_aclk)
-  begin
-    if aresetn = '0' then
-      s_axis_tready <= '0';
-    elsif s_axis_aclk'event and s_axis_aclk = '1' then
-        if s_axis_tready_o = '1' then
-          s_axis_tready <= '1';
-        else
-          s_axis_tready <= '0';
-        end if;
-    end if;
-    end process TREADY_PROC;
-  
-  --USER logic implementation added here
-    READ_FIFO_DATA_PROC : process (aresetn, s_axis_aclk)
-    begin
-    if aresetn = '0' then
-      rd_strm_data <= (others => '0');
-    elsif s_axis_aclk'event and s_axis_aclk = '1' then
-        if s_axis_tready_o = '1' then
-          rd_strm_data <= s_axis_tdata;
-        else
-          rd_strm_data <= rd_strm_data;
-        end if;
-    end if;
-    end process READ_FIFO_DATA_PROC;
+  link_rst <= slv_reg2(0);
+  Lx_CLK <= Lx_CLK_out;
+  s_axis_tready <= tready;
 
-    LINK_ST_PORT_PROCESS   :   process(aresetn,s_axis_aclk)
+  TREDY_PROC : process (s_axis_aclk, aresetn)
+  begin
+  if s_axis_aclk'event and s_axis_aclk = '1' then
+    if (aresetn = '0') then
+    rd_strm_data <= (others => '0');
+    tready <= '0';
+    tready_ind <= '0';
+    elsif (s_axis_tvalid = '1' and strm_data_rd_en = '1') and tready_ind = '0' then 
+    rd_strm_data <= s_axis_tdata;
+    tready <= '1';
+    tready_ind <= '1';
+    elsif strm_data_rd_en = '0' then
+    tready_ind <= '0';
+    else
+    tready <= '0';
+    end if;
+  end if;
+  end process TREDY_PROC;
+
+  LX_CLK_OUT_PROC : process (axis_clk_2x, aresetn)
+  begin
+  if axis_clk_2x'event and axis_clk_2x = '1' then
+    if (aresetn = '0' or link_rst = '1') then
+    Lx_CLK_out <= '0';
+    elsif send_link_data = '1' then 
+    Lx_CLK_out <= link_clk;
+    else
+    Lx_CLK_out <= '1';
+    end if;
+  end if;
+  end process LX_CLK_OUT_PROC;
+  
+  LX_DAT_OUT_PROC : process (axis_clk_2x, aresetn)
+  begin
+  if axis_clk_2x'event and axis_clk_2x = '1' then
+    if (aresetn = '0' or link_rst = '1') then
+    Lx_DAT <= x"00";
+    elsif send_link_data = '1' then 
+    Lx_DAT <= Lx_DAT_out;
+    else
+    Lx_DAT <= x"00";
+    end if;
+  end if;
+  
+  end process LX_DAT_OUT_PROC;
+      
+  DIVIDE_CLK_INST : process (axis_clk_2x_180, aresetn)
+  begin
+    if axis_clk_2x_180'event and axis_clk_2x_180 = '1' then
+      if aresetn = '0' then 
+      clk_dev_n <= '1';
+      clk_counter <= (others => '0');
+      elsif clk_counter = (divide - 1) then 
+      clk_counter <= (others => '0');
+      clk_dev_n <= not clk_dev_n;
+      else 
+      clk_counter <= clk_counter + 1;
+      end if;
+    end if;
+  end process DIVIDE_CLK_INST;
+  
+  CLK_DEV_SYNC_INST : process (axis_clk_2x, aresetn)
+  begin
+   if axis_clk_2x'event and axis_clk_2x = '1' then
+     if aresetn = '0' then 
+     clk_dev <= '0';
+     elsif clk_dev_n = '1' then
+     clk_dev <= '1';
+     else
+     clk_dev <= '0';
+     end if;
+   end if;
+  link_clk <= clk_dev;
+  end process CLK_DEV_SYNC_INST;
+  
+
+    LINK_ST_PORT_PROCESS   :   process(link_rst,link_clk)
     begin
-      if aresetn = '0' then
-        link_state  <=  IDLE;
-        elsif (s_axis_aclk'event and s_axis_aclk = '1') then
+      if link_rst = '1' then
+        link_state <=  IDLE;
+        elsif (link_clk'event and link_clk = '1') then
             case link_state is
               when IDLE => 
                   link_state <= LINK_PORT_ST_RD;
@@ -230,90 +280,21 @@ begin
                   link_state <= LINK_PORT_ST_RD;
                 end if;
               when READ_STRM_DATA =>
-                  send_lnk_data_count <= x"0000_0000";
-                  link_state <= SEND_BYTE1_p;
-              when SEND_BYTE1_p =>
-                if divide = x"0000_0001" then 
-                link_state <= SEND_BYTE2_p;
-                elsif send_lnk_data_count = tresh_phase then
-                send_lnk_data_count <= x"0000_0000";
-                link_state <= SEND_BYTE1_n;
-                else 
-                link_state <= SEND_BYTE1_p;
-                send_lnk_data_count <= send_lnk_data_count + x"0000_0001";
-                end if;
-              when SEND_BYTE1_n =>
-                if divide = x"0000_0001" then 
-                link_state <= SEND_BYTE2_p;
-                elsif send_lnk_data_count = tresh_phase then
-                send_lnk_data_count <= x"0000_0000";
-                link_state <= SEND_BYTE2_p;
-                else 
-                link_state <= SEND_BYTE1_n;
-                send_lnk_data_count <= send_lnk_data_count + x"0000_0001";
-                end if;
-              when SEND_BYTE2_p =>
-                if divide = x"0000_0001" then 
-                link_state <= SEND_BYTE3_p;
-                elsif send_lnk_data_count = tresh_phase then
-                send_lnk_data_count <= x"0000_0000";
-                link_state <= SEND_BYTE2_n;
-                else 
-                link_state <= SEND_BYTE2_p;
-                send_lnk_data_count <= send_lnk_data_count + x"0000_0001";
-                end if;
-              when SEND_BYTE2_n =>
-                if divide = x"0000_0001" then 
-                link_state <= SEND_BYTE3_p;
-                elsif send_lnk_data_count = tresh_phase then
-                send_lnk_data_count <= x"0000_0000";
-                link_state <= SEND_BYTE3_p;
-                else 
-                link_state <= SEND_BYTE2_n;
-                send_lnk_data_count <= send_lnk_data_count + x"0000_0001";
-                end if;
-              when SEND_BYTE3_p =>
-                if divide = x"0000_0001" then 
-                link_state <= SEND_BYTE4_p;
-                elsif send_lnk_data_count = tresh_phase then
-                send_lnk_data_count <= x"0000_0000";
-                link_state <= SEND_BYTE4_n;
-                else 
-                link_state <= SEND_BYTE3_p;
-                send_lnk_data_count <= send_lnk_data_count + x"0000_0001";
-                end if;
-              when SEND_BYTE3_n =>
-                if divide = x"0000_0001" then 
-                link_state <= SEND_BYTE4_p;
-                elsif send_lnk_data_count = tresh_phase then
-                send_lnk_data_count <= x"0000_0000";
-                link_state <= SEND_BYTE4_p;
-                else 
-                link_state <= SEND_BYTE3_n;
-                send_lnk_data_count <= send_lnk_data_count + x"0000_0001";
-                end if;
-              when SEND_BYTE4_p =>
-                if divide = x"0000_0001" then 
+                  if (tready_ind = '1') then 
+                  link_state <= SEND_BYTE1;
+                  else 
+                  link_state <= READ_STRM_DATA;
+                  end if;
+              when SEND_BYTE1 =>
+                link_state <= SEND_BYTE2;
+              when SEND_BYTE2 =>
+                link_state <= SEND_BYTE3;
+              when SEND_BYTE3 =>
+                link_state <= SEND_BYTE4;
+              when SEND_BYTE4 =>
                 link_state <= LINK_PORT_ST_RD;
-                elsif send_lnk_data_count = tresh_phase then
-                send_lnk_data_count <= x"0000_0000";
-                link_state <= SEND_BYTE4_n;
-                else 
-                link_state <= SEND_BYTE4_p;
-                send_lnk_data_count <= send_lnk_data_count + x"0000_0001";
-                end if;
-              when SEND_BYTE4_n =>
-                if divide = x"0000_0001" then 
-                link_state <= LINK_PORT_ST_RD;
-                elsif send_lnk_data_count = tresh_phase then
-                send_lnk_data_count <= x"0000_0000";
-                link_state <= LINK_PORT_ST_RD;
-                else 
-                link_state <= SEND_BYTE4_n;
-                send_lnk_data_count <= send_lnk_data_count + x"0000_0001";
-                end if;
               when others =>
-              link_state <= IDLE;
+                link_state <= IDLE;
             end case;
       end if;
     end process LINK_ST_PORT_PROCESS;
@@ -322,44 +303,33 @@ begin
     begin 
 	   case link_state is
         when IDLE =>
+          strm_data_rd_en <= '0';
           send_link_data <= '0';
-          status_link_up <= '0';
         when LINK_PORT_ST_RD =>
           send_link_data <= '0';
-          status_link_up <= '1';
+          strm_data_rd_en <= '0';
         when READ_STRM_DATA =>
-          s_axis_tready_o <= '1';
-        when SEND_BYTE1_p =>
+          send_link_data <= '0';
+          strm_data_rd_en <= '1';
+        when SEND_BYTE1 =>
           send_link_data <= '1';
-          clk_dev <= '1';
+          strm_data_rd_en <= '0';
           Lx_DAT_out <= rd_strm_data(31 downto 24);
-          s_axis_tready_o <= '0';
-        when SEND_BYTE1_n =>
+        when SEND_BYTE2 =>
           send_link_data <= '1';
-          clk_dev <= '0';
-          Lx_DAT_out <= rd_strm_data(31 downto 24);
-          s_axis_tready_o <= '0';
-        when SEND_BYTE2_p =>
-          clk_dev <= '1';
+          strm_data_rd_en <= '0';
           Lx_DAT_out <= rd_strm_data(23 downto 16);
-        when SEND_BYTE2_n =>
-          clk_dev <= '0';
-          Lx_DAT_out <= rd_strm_data(23 downto 16);
-        when SEND_BYTE3_p =>
-          clk_dev <= '1';
+        when SEND_BYTE3 =>
+          send_link_data <= '1';
+          strm_data_rd_en <= '0';
           Lx_DAT_out <= rd_strm_data(15 downto 8);
-        when SEND_BYTE3_n =>
-          clk_dev <= '0';
-          Lx_DAT_out <= rd_strm_data(15 downto 8);
-        when SEND_BYTE4_p =>
-          clk_dev <= '1';
-          Lx_DAT_out <= rd_strm_data(7 downto 0);
-        when SEND_BYTE4_n =>
-          clk_dev <= '0';
+        when SEND_BYTE4 =>
+          send_link_data <= '1';
+          strm_data_rd_en <= '0';
           Lx_DAT_out <= rd_strm_data(7 downto 0);
         when others =>
+          strm_data_rd_en <= '0';
           send_link_data <= '0';
-          status_link_up <= '0';
       end case;
     end process LINK_PROCESS;
     
@@ -393,7 +363,7 @@ begin
     if Bus2IP_Clk'event and Bus2IP_Clk = '1' then
       if Bus2IP_Resetn = '0' then
         init_reg <= x"AD05_2018"; 
-        divide <= x"0000_0001"; 
+        divide <= x"0000_0002"; 
         slv_reg2 <= (others => '0');
         slv_reg3 <= (others => '0');
       else

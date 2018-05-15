@@ -9,4 +9,3 @@ lib axi_lite_ipif_v1_01_a  all
 
 lib axis2link_v1_00_a link_interface vhdl
 lib axis2link_v1_00_a axis2link vhdl
-lib axis2link_v1_00_a link_clock_devider vhdl

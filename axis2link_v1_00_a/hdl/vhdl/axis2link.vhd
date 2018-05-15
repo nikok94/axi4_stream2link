@@ -116,7 +116,6 @@ entity axis2link is
   (
     -- ADD USER GENERICS BELOW THIS LINE ---------------
     --USER generics added here
-    C_S_AXIS_FIFO_DEPTH            : integer              := 16;
     C_S_AXIS_CLK_FREQ_HZ           : integer              := 100_000_000;
     C_S_AXIS_TDATA_WIDTH           : integer              := 32;
     -- ADD USER GENERICS ABOVE THIS LINE ---------------
@@ -148,6 +147,9 @@ entity axis2link is
     s_axis_tdata                   : in  std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0) := (others => '0');
     s_axis_tvalid                  : in  std_logic:= '0';
     s_axis_tready                  : out std_logic;
+    
+    axis_clk_2x                    : in std_logic;
+    axis_clk_2x_180                : in std_logic;
     
     Lx_DAT                         : out std_logic_vector(7 downto 0);
     Lx_ACK                         : in std_logic;
@@ -311,7 +313,6 @@ begin
       C_FAMILY                       => C_FAMILY,
       C_S_AXIS_CLK_FREQ_HZ           => C_S_AXIS_CLK_FREQ_HZ,
       C_S_AXIS_TDATA_WIDTH           => C_S_AXIS_TDATA_WIDTH,
-      C_S_AXIS_FIFO_DEPTH            => C_S_AXIS_FIFO_DEPTH,
       -- MAP USER GENERICS ABOVE THIS LINE ---------------
       C_NUM_REG                      => USER_NUM_REG,
       C_SLV_DWIDTH                   => USER_SLV_DWIDTH
@@ -328,6 +329,8 @@ begin
       Lx_DAT                         => Lx_DAT,
       Lx_ACK                         => Lx_ACK,
       Lx_CLK                         => Lx_CLK,
+      axis_clk_2x                    => axis_clk_2x    ,
+      axis_clk_2x_180                => axis_clk_2x_180,
       -- MAP USER PORTS ABOVE THIS LINE ------------------
 
       Bus2IP_Clk                     => ipif_Bus2IP_Clk,

@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+
+
+
+<!DOCTYPE doc SYSTEM "../../ipdialog.dtd" [
+    <!-- -->
+    <!ENTITY C_FAMILY '
+    <widget id="C_FAMILY">
+        <key>C_FAMILY</key>
+        <label>Target FPGA Architecture</label>
+        <tip></tip>
+    </widget>
+    '>
+    <!ENTITY C_S_AXI_DATA_WIDTH '
+    <widget id="C_S_AXI_DATA_WIDTH">
+        <key>C_S_AXI_DATA_WIDTH</key>
+        <label>AXI-Lite Slave Data Width</label>
+        <tip></tip>
+    </widget>
+    '>
+    <!ENTITY C_S_AXI_ADDR_WIDTH '
+    <widget id="C_S_AXI_ADDR_WIDTH">
+        <key>C_S_AXI_ADDR_WIDTH</key>
+        <label>AXI-Lite Slave Address Width</label>
+        <tip></tip>
+    </widget>
+    '>
+    <!ENTITY C_BASEADDR '
+    <widget id="C_BASEADDR">
+        <key>C_BASEADDR</key>
+        <label>AXI Slave IP Base Address</label>
+        <tip></tip>
+    </widget>
+    '>
+    <!ENTITY C_HIGHADDR '
+    <widget id="C_HIGHADDR">
+        <key>C_HIGHADDR</key>
+        <label>AXI Slave IP High Address</label>
+        <tip></tip>
+    </widget>
+    '>
+    
+    <!ENTITY C_S_AXIS_CLK_FREQ_HZ '
+    <widget id="C_S_AXIS_CLK_FREQ_HZ">
+        <key>C_S_AXIS_CLK_FREQ_HZ</key>
+        <label>AXI-Stream Clock Frequency (Hz)</label>
+        <tip></tip>
+        <unit>Hz</unit>
+    </widget>
+    '>
+    
+    <!ENTITY C_S_AXIS_TDATA_WIDTH '
+    <widget id="C_S_AXIS_TDATA_WIDTH">
+        <key>C_S_AXIS_TDATA_WIDTH</key>
+        <label>AXI Stream Slave Data Width</label>
+        <tip></tip>
+    </widget>
+    '>
+    <!ENTITY C_S_AXI_PROTOCOL '
+        <widget id="C_S_AXI_PROTOCOL">
+        <key>C_S_AXI_PROTOCOL</key>
+        <label>AXI4 Protocol</label>
+        <tip></tip>
+        </widget>
+    '>
+]>
+
+<doc>
+    <view id="User">
+        <display>User</display>
+        <group id="Addresses">
+            <display>AXI-Stream Slave Settings</display>
+            <item>&C_BASEADDR;</item>
+            <item>&C_HIGHADDR;</item>
+        </group>	
+        
+        <group id="AXI">
+            <display>AXI</display>	
+            <item>&C_FAMILY;</item>
+            <item>&C_S_AXI_DATA_WIDTH;</item>
+            <item>&C_S_AXI_ADDR_WIDTH;</item>
+            <item>&C_S_AXI_PROTOCOL;</item>
+        </group>
+        <group id="Stream Settings">
+            <display>AXI-Stream</display>
+            <item>&C_S_AXIS_CLK_FREQ_HZ;</item>
+            <item>&C_S_AXIS_TDATA_WIDTH;</item>
+        </group>	
+
+    </view>
+ </doc>
