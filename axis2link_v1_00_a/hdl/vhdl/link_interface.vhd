@@ -156,12 +156,17 @@ architecture IMP of link_interface is
   signal clk_counter                    : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
   signal divide                         : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
   signal link_rst                       : std_logic;
-  signal clk_dev                        : std_logic:='0';
-  signal clk_dev_n                      : std_logic:='1';
+  signal clk_div                        : std_logic:='0';
+  signal clk_div_n                      : std_logic:='1';
   signal link_clk                       : std_logic:='0';
+  
+  signal clk_div_delay                  : std_logic:='0';
+  --signal clk_dev_n                      : std_logic:='1';
+  --signal link_clk                       : std_logic:='0';
   signal tready_ind                     : std_logic;
   
-  signal tready                         : std_logic:= '0';
+  signal clk_div_up                     : std_logic:='0';
+  signal next_byte                      : std_logic:='0';
   
   signal strm_data_rd_en                : std_logic:= '0';
   
@@ -186,29 +191,23 @@ architecture IMP of link_interface is
 begin
   Lx_ACK_i <= Lx_ACK;
   link_rst <= slv_reg2(0);
-  Lx_CLK <= Lx_CLK_out;
-  s_axis_tready <= tready;
+  s_axis_tready <= strm_data_rd_en;
 
-  TREDY_PROC : process (s_axis_aclk, aresetn)
+  UP_CLK_DIV_INIT : process (axis_clk_2x)
   begin
-  if s_axis_aclk'event and s_axis_aclk = '1' then
+  if axis_clk_2x'event and axis_clk_2x = '1' then
     if (aresetn = '0') then
-    rd_strm_data <= (others => '0');
-    tready <= '0';
-    tready_ind <= '0';
-    elsif (s_axis_tvalid = '1' and strm_data_rd_en = '1') and tready_ind = '0' then 
-    rd_strm_data <= s_axis_tdata;
-    tready <= '1';
-    tready_ind <= '1';
-    elsif strm_data_rd_en = '0' then
-    tready_ind <= '0';
+    clk_div_up <= '0';
+    clk_div_delay <= '0';
     else
-    tready <= '0';
+    clk_div_delay <= clk_div;
     end if;
+    clk_div_up <= (not clk_div_delay) and clk_div;
   end if;
-  end process TREDY_PROC;
+  next_byte <= clk_div_up;
+  end process UP_CLK_DIV_INIT;
 
-  LX_CLK_OUT_PROC : process (axis_clk_2x, aresetn)
+  LX_CLK_OUT_PROC : process (axis_clk_2x)
   begin
   if axis_clk_2x'event and axis_clk_2x = '1' then
     if (aresetn = '0' or link_rst = '1') then
@@ -218,10 +217,11 @@ begin
     else
     Lx_CLK_out <= '1';
     end if;
+  Lx_CLK <= Lx_CLK_out;
   end if;
   end process LX_CLK_OUT_PROC;
   
-  LX_DAT_OUT_PROC : process (axis_clk_2x, aresetn)
+  LX_DAT_OUT_PROC : process (axis_clk_2x)
   begin
   if axis_clk_2x'event and axis_clk_2x = '1' then
     if (aresetn = '0' or link_rst = '1') then
@@ -235,41 +235,41 @@ begin
   
   end process LX_DAT_OUT_PROC;
       
-  DIVIDE_CLK_INST : process (axis_clk_2x_180, aresetn)
+  DIVIDE_CLK_INST : process (axis_clk_2x_180)
   begin
     if axis_clk_2x_180'event and axis_clk_2x_180 = '1' then
       if aresetn = '0' then 
-      clk_dev_n <= '1';
+      clk_div_n <= '1';
       clk_counter <= (others => '0');
       elsif clk_counter = (divide - 1) then 
       clk_counter <= (others => '0');
-      clk_dev_n <= not clk_dev_n;
+      clk_div_n <= not clk_div_n;
       else 
       clk_counter <= clk_counter + 1;
       end if;
     end if;
   end process DIVIDE_CLK_INST;
   
-  CLK_DEV_SYNC_INST : process (axis_clk_2x, aresetn)
+  CLK_DEV_SYNC_INST : process (axis_clk_2x)
   begin
    if axis_clk_2x'event and axis_clk_2x = '1' then
      if aresetn = '0' then 
-     clk_dev <= '0';
-     elsif clk_dev_n = '1' then
-     clk_dev <= '1';
+     clk_div <= '0';
+     elsif clk_div_n = '1' then
+     clk_div <= '1';
      else
-     clk_dev <= '0';
+     clk_div <= '0';
      end if;
    end if;
-  link_clk <= clk_dev;
+  link_clk <= clk_div;
   end process CLK_DEV_SYNC_INST;
   
 
-    LINK_ST_PORT_PROCESS   :   process(link_rst,link_clk)
+    LINK_ST_PORT_PROCESS   :   process(axis_clk_2x)
     begin
-      if link_rst = '1' then
+      if aresetn = '0' then
         link_state <=  IDLE;
-        elsif (link_clk'event and link_clk = '1') then
+        elsif (axis_clk_2x'event and axis_clk_2x = '1') then
             case link_state is
               when IDLE => 
                   link_state <= LINK_PORT_ST_RD;
@@ -280,19 +280,35 @@ begin
                   link_state <= LINK_PORT_ST_RD;
                 end if;
               when READ_STRM_DATA =>
-                  if (tready_ind = '1') then 
+                  if (strm_data_rd_en = '1' and s_axis_tvalid = '1') then
                   link_state <= SEND_BYTE1;
                   else 
                   link_state <= READ_STRM_DATA;
                   end if;
               when SEND_BYTE1 =>
+                if next_byte = '1' then
                 link_state <= SEND_BYTE2;
+                else
+                link_state <= SEND_BYTE1;
+                end if;
               when SEND_BYTE2 =>
+                if next_byte = '1' then
                 link_state <= SEND_BYTE3;
+                else
+                link_state <= SEND_BYTE2;
+                end if;
               when SEND_BYTE3 =>
+                if next_byte = '1' then
                 link_state <= SEND_BYTE4;
+                else
+                link_state <= SEND_BYTE3;
+                end if;
               when SEND_BYTE4 =>
+                if next_byte = '1' then
                 link_state <= LINK_PORT_ST_RD;
+                else
+                link_state <= SEND_BYTE4;
+                end if;
               when others =>
                 link_state <= IDLE;
             end case;
@@ -309,6 +325,7 @@ begin
           send_link_data <= '0';
           strm_data_rd_en <= '0';
         when READ_STRM_DATA =>
+          rd_strm_data <= s_axis_tdata;
           send_link_data <= '0';
           strm_data_rd_en <= '1';
         when SEND_BYTE1 =>
@@ -363,7 +380,7 @@ begin
     if Bus2IP_Clk'event and Bus2IP_Clk = '1' then
       if Bus2IP_Resetn = '0' then
         init_reg <= x"AD05_2018"; 
-        divide <= x"0000_0002"; 
+        divide <= x"0000_0004"; 
         slv_reg2 <= (others => '0');
         slv_reg3 <= (others => '0');
       else
