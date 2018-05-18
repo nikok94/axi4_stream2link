@@ -112,7 +112,6 @@ entity link_interface is
     s_axis_tready                  : out std_logic;
     
     axis_clk_2x                    : in std_logic;
-    axis_clk_2x_180                : in std_logic;
     
     Lx_DAT                         : out std_logic_vector(7 downto 0);
     Lx_ACK                         : in std_logic;
@@ -149,32 +148,34 @@ end entity link_interface;
 ------------------------------------------------------------------------------
 
 architecture IMP of link_interface is
-    
+
   type LINK_PORT_STATE_TYPE         is  (IDLE, LINK_PORT_ST_RD, READ_STRM_DATA, SEND_BYTE1, SEND_BYTE2, SEND_BYTE3, SEND_BYTE4);
   signal link_state                     : LINK_PORT_STATE_TYPE;
   --USER signal declarations added here, as needed for user logic
   signal clk_counter                    : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
   signal divide                         : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
-  signal link_rst                       : std_logic;
-  signal clk_div                        : std_logic:='0';
-  signal clk_div_n                      : std_logic:='1';
+  signal link_rst                       : std_logic:= '1';
+  signal clk_dev                        : std_logic:='0';
+  signal clk_dev_n                      : std_logic:='1';
   signal link_clk                       : std_logic:='0';
-  
-  signal clk_div_delay                  : std_logic:='0';
-  --signal clk_dev_n                      : std_logic:='1';
-  --signal link_clk                       : std_logic:='0';
   signal tready_ind                     : std_logic;
+  signal rd_clk                         : std_logic:= '0';
+  signal rd_clk_count                   : std_logic_vector(1 downto 0):= b"00";
+  --FIFO signals
+  signal RD_EN                          : std_logic;
+  signal RD_EN_count                    : std_logic_vector(1 downto 0);
   
-  signal clk_div_up                     : std_logic:='0';
-  signal next_byte                      : std_logic:='0';
+  signal tready                         : std_logic:= '0';
   
   signal strm_data_rd_en                : std_logic:= '0';
   
   signal send_link_data                 : std_logic:= '0';
+  signal Lx_CLK_sts                     : std_logic:= '0';
   signal Lx_CLK_out                     : std_logic:= '0';
   signal Lx_DAT_out                     : std_logic_vector(7 downto 0):= x"00";
   signal Lx_ACK_i                       : std_logic;
   signal rd_strm_data                   : std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0):= x"0000_0000";
+  signal tdata                          : std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0):= x"0000_0000";
   ------------------------------------------
   -- Signals for user logic slave model s/w accessible register example
   ------------------------------------------
@@ -189,143 +190,125 @@ architecture IMP of link_interface is
   signal slv_write_ack                  : std_logic;
 
 begin
+  s_axis_tready <= tready;
+  tready <= strm_data_rd_en when divide = x"0000_0001" else RD_EN;
+  Lx_DAT <= Lx_DAT_out when send_link_data = '1' else x"00";
+  Lx_CLK <= clk_dev when send_link_data = '1' else Lx_CLK_sts;
   Lx_ACK_i <= Lx_ACK;
-  link_rst <= slv_reg2(0);
-  s_axis_tready <= strm_data_rd_en;
+  
+  RD_DATA_PROC :  process (s_axis_aclk, aresetn)
+  begin 
+  if s_axis_aclk'event and s_axis_aclk = '0' then
+    if (aresetn = '0') then
+      rd_strm_data <= x"0000_0000";
+    elsif tready = '1' then
+      rd_strm_data <= s_axis_tdata;
+    else 
+      rd_strm_data <= rd_strm_data;
+    end if;
+  end if;
+  end process RD_DATA_PROC;
+  
+  LINK_RST_PROC : process (rd_clk)
+  begin
+  if rd_clk'event and rd_clk = '1' then
+    if (aresetn = '0') then
+    link_rst <= '1';
+    elsif slv_reg2(0) = '1' then
+    link_rst <= '1';
+    else 
+    link_rst <= '0';
+    end if;
+  end if;
+  end process LINK_RST_PROC;
 
-  UP_CLK_DIV_INIT : process (axis_clk_2x)
+  RD_CLK_PROC : process (axis_clk_2x, aresetn)
   begin
   if axis_clk_2x'event and axis_clk_2x = '1' then
     if (aresetn = '0') then
-    clk_div_up <= '0';
-    clk_div_delay <= '0';
+      rd_clk <= '1';
     else
-    clk_div_delay <= clk_div;
+      rd_clk<= not rd_clk;
     end if;
-    clk_div_up <= (not clk_div_delay) and clk_div;
   end if;
-  next_byte <= clk_div_up;
-  end process UP_CLK_DIV_INIT;
+  end process RD_CLK_PROC;
+  
+  RD_EN_GEN : process(rd_clk, aresetn)
+  begin
+  if rd_clk'event and rd_clk = '1' then
+    if (aresetn = '0' or strm_data_rd_en = '0') then
+      RD_EN <= '0';
+      RD_EN_count <= b"00";
+    elsif (strm_data_rd_en = '1' and RD_EN_count = b"00")then 
+      RD_EN <= '1';
+      RD_EN_count <= RD_EN_count + 1;
+    else 
+    RD_EN <= '0';
+    RD_EN_count <= RD_EN_count;
+    end if;
+  end if;
+  end process RD_EN_GEN;
 
-  LX_CLK_OUT_PROC : process (axis_clk_2x)
-  begin
-  if axis_clk_2x'event and axis_clk_2x = '1' then
-    if (aresetn = '0' or link_rst = '1') then
-    Lx_CLK_out <= '0';
-    elsif send_link_data = '1' then 
-    Lx_CLK_out <= link_clk;
-    else
-    Lx_CLK_out <= '1';
-    end if;
-  Lx_CLK <= Lx_CLK_out;
-  end if;
-  end process LX_CLK_OUT_PROC;
-  
-  LX_DAT_OUT_PROC : process (axis_clk_2x)
-  begin
-  if axis_clk_2x'event and axis_clk_2x = '1' then
-    if (aresetn = '0' or link_rst = '1') then
-    Lx_DAT <= x"00";
-    elsif send_link_data = '1' then 
-    Lx_DAT <= Lx_DAT_out;
-    else
-    Lx_DAT <= x"00";
-    end if;
-  end if;
-  
-  end process LX_DAT_OUT_PROC;
       
-  DIVIDE_CLK_INST : process (axis_clk_2x_180)
+  DIVIDE_CLK_INST : process (axis_clk_2x, aresetn, link_rst)
   begin
-    if axis_clk_2x_180'event and axis_clk_2x_180 = '1' then
-      if aresetn = '0' then 
-      clk_div_n <= '1';
+    if axis_clk_2x'event and axis_clk_2x = '1' then
+      if aresetn = '0' or link_rst = '1' then 
+      clk_dev <= '1';
       clk_counter <= (others => '0');
       elsif clk_counter = (divide - 1) then 
       clk_counter <= (others => '0');
-      clk_div_n <= not clk_div_n;
+      clk_dev <= not clk_dev;
       else 
       clk_counter <= clk_counter + 1;
       end if;
     end if;
   end process DIVIDE_CLK_INST;
   
-  CLK_DEV_SYNC_INST : process (axis_clk_2x)
-  begin
-   if axis_clk_2x'event and axis_clk_2x = '1' then
-     if aresetn = '0' then 
-     clk_div <= '0';
-     elsif clk_div_n = '1' then
-     clk_div <= '1';
-     else
-     clk_div <= '0';
-     end if;
-   end if;
-  link_clk <= clk_div;
-  end process CLK_DEV_SYNC_INST;
-  
 
-    LINK_ST_PORT_PROCESS   :   process(axis_clk_2x)
+  LINK_ST_PORT_PROCESS   :   process(link_rst,clk_dev, s_axis_tvalid, Lx_ACK_i)
     begin
-      if aresetn = '0' then
+    if aresetn = '0' or link_rst = '1' then
         link_state <=  IDLE;
-        elsif (axis_clk_2x'event and axis_clk_2x = '1') then
-            case link_state is
-              when IDLE => 
-                  link_state <= LINK_PORT_ST_RD;
-              when LINK_PORT_ST_RD => 
-                if ((Lx_ACK_i = '1') and (s_axis_tvalid = '1')) then
-                  link_state <= READ_STRM_DATA;
-                else 
-                  link_state <= LINK_PORT_ST_RD;
-                end if;
-              when READ_STRM_DATA =>
-                  if (strm_data_rd_en = '1' and s_axis_tvalid = '1') then
-                  link_state <= SEND_BYTE1;
-                  else 
-                  link_state <= READ_STRM_DATA;
-                  end if;
-              when SEND_BYTE1 =>
-                if next_byte = '1' then
-                link_state <= SEND_BYTE2;
-                else
-                link_state <= SEND_BYTE1;
-                end if;
-              when SEND_BYTE2 =>
-                if next_byte = '1' then
-                link_state <= SEND_BYTE3;
-                else
-                link_state <= SEND_BYTE2;
-                end if;
-              when SEND_BYTE3 =>
-                if next_byte = '1' then
-                link_state <= SEND_BYTE4;
-                else
-                link_state <= SEND_BYTE3;
-                end if;
-              when SEND_BYTE4 =>
-                if next_byte = '1' then
-                link_state <= LINK_PORT_ST_RD;
-                else
-                link_state <= SEND_BYTE4;
-                end if;
-              when others =>
-                link_state <= IDLE;
-            end case;
-      end if;
+    elsif (clk_dev'event and clk_dev = '1') then
+        case link_state is
+          when IDLE => 
+              link_state <= LINK_PORT_ST_RD;
+          when LINK_PORT_ST_RD => 
+            if ((Lx_ACK_i = '1') and (s_axis_tvalid = '1')) then
+              link_state <= READ_STRM_DATA;
+            else 
+              link_state <= LINK_PORT_ST_RD;
+            end if;
+          when READ_STRM_DATA =>
+            link_state <= SEND_BYTE1;
+          when SEND_BYTE1 =>
+            link_state <= SEND_BYTE2;
+          when SEND_BYTE2 =>
+            link_state <= SEND_BYTE3;
+          when SEND_BYTE3 =>
+            link_state <= SEND_BYTE4;
+          when SEND_BYTE4 =>
+            link_state <= LINK_PORT_ST_RD;
+          when others =>
+            link_state <= IDLE;
+        end case;
+    end if;
     end process LINK_ST_PORT_PROCESS;
     
-    LINK_PROCESS    :   process (link_state) is
+  LINK_STATE_PROCESS    :   process (link_state) is
     begin 
-	   case link_state is
+    case link_state is
         when IDLE =>
+          Lx_CLK_sts <= '0';
           strm_data_rd_en <= '0';
           send_link_data <= '0';
         when LINK_PORT_ST_RD =>
+          Lx_CLK_sts <= '1';
           send_link_data <= '0';
           strm_data_rd_en <= '0';
         when READ_STRM_DATA =>
-          rd_strm_data <= s_axis_tdata;
+          Lx_CLK_sts <= '1';
           send_link_data <= '0';
           strm_data_rd_en <= '1';
         when SEND_BYTE1 =>
@@ -345,10 +328,11 @@ begin
           strm_data_rd_en <= '0';
           Lx_DAT_out <= rd_strm_data(7 downto 0);
         when others =>
+          Lx_CLK_sts <= '0';
           strm_data_rd_en <= '0';
           send_link_data <= '0';
       end case;
-    end process LINK_PROCESS;
+    end process LINK_STATE_PROCESS;
     
   ------------------------------------------
   -- Example code to read/write user logic slave model s/w accessible registers
@@ -380,7 +364,7 @@ begin
     if Bus2IP_Clk'event and Bus2IP_Clk = '1' then
       if Bus2IP_Resetn = '0' then
         init_reg <= x"AD05_2018"; 
-        divide <= x"0000_0004"; 
+        divide <= x"0000_0001"; 
         slv_reg2 <= (others => '0');
         slv_reg3 <= (others => '0');
       else

@@ -68,7 +68,7 @@ PORT s_axis_tvalid = TVALID, DIR = I, BUS = S_AXIS
 PORT s_axis_tready = TREADY, DIR = O, BUS = S_AXIS
 
 PORT axis_clk_2x = "", DIR = I, SIGIS = CLK
-PORT axis_clk_2x_180 = "", DIR = I, SIGIS = CLK
+##PORT axis_clk_2x_180 = "", DIR = I, SIGIS = CLK
 
 PORT Lx_DAT = "", DIR = O, VEC = [7:0]
 PORT Lx_ACK = "", DIR = I

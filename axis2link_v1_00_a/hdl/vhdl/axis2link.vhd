@@ -149,7 +149,6 @@ entity axis2link is
     s_axis_tready                  : out std_logic;
     
     axis_clk_2x                    : in std_logic;
-    axis_clk_2x_180                : in std_logic;
     
     Lx_DAT                         : out std_logic_vector(7 downto 0);
     Lx_ACK                         : in std_logic;
@@ -330,7 +329,6 @@ begin
       Lx_ACK                         => Lx_ACK,
       Lx_CLK                         => Lx_CLK,
       axis_clk_2x                    => axis_clk_2x    ,
-      axis_clk_2x_180                => axis_clk_2x_180,
       -- MAP USER PORTS ABOVE THIS LINE ------------------
 
       Bus2IP_Clk                     => ipif_Bus2IP_Clk,
