@@ -59,7 +59,9 @@ Library UNISIM;
 use UNISIM.vcomponents.all;
 
 library axis2link_v1_00_a;
-use axis2link_v1_00_a.fifo_32;
+--use axis2link_v1_00_a.fifo_32;
+use axis2link_v1_00_a.axis_async_fifo;
+
 
 library proc_common_v3_00_a;
 use proc_common_v3_00_a.proc_common_pkg.all;
@@ -216,11 +218,22 @@ architecture IMP of link_interface is
 begin
 link_rst <= slv_reg2(0);
 
-
-FIFO_INST : entity axis2link_v1_00_a.fifo_32
+FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
+  generic map(
+    C_FAMILY              => C_FAMILY,
+    --C_FIFO_DEPTH          => 256,
+    --C_PROG_FULL_THRESH    => 128,
+    C_DATA_WIDTH          => C_S_AXIS_TDATA_WIDTH
+    --C_PTR_WIDTH           => 8,
+    --C_MEMORY_TYPE         => 2,
+    --C_COMMON_CLOCK        => 0,
+    --C_IMPLEMENTATION_TYPE => 1,
+    --C_SYNCHRONIZER_STAGE  => 1
+  )
   port map(
     rst => fifo_rst,
     wr_clk => s_axis_aclk,
+--    sync_clk => sys_lx_clk,
     rd_clk => sys_lx_clk,
     din => s_axis_tdata,
     wr_en => s_axis_tvalid,
@@ -228,8 +241,24 @@ FIFO_INST : entity axis2link_v1_00_a.fifo_32
     dout => fifo_dout,
     full => fifo_full,
     empty => fifo_empty,
-    valid => fifo_dout_valid
+    valid => fifo_dout_valid,
+    prog_full => open
   );
+
+
+--FIFO_INST : entity axis2link_v1_00_a.fifo_32
+--  port map(
+--    rst => fifo_rst,
+--    wr_clk => s_axis_aclk,
+--    rd_clk => sys_lx_clk,
+--    din => s_axis_tdata,
+--    wr_en => s_axis_tvalid,
+--    rd_en => fifo_rd_en,
+--    dout => fifo_dout,
+--    full => fifo_full,
+--    empty => fifo_empty,
+--    valid => fifo_dout_valid
+--  );
   
   FIFO_RD_EN_PROC  : process(sys_lx_clk)
   begin 
@@ -245,7 +274,7 @@ FIFO_INST : entity axis2link_v1_00_a.fifo_32
           end if;
   end if;
   end process FIFO_RD_EN_PROC;
- 
+  
   RATIO_COUNT_PROCESS: process(sys_lx_clk)
   begin
       if(sys_lx_clk'event and sys_lx_clk = '1') then
@@ -372,8 +401,6 @@ FIFO_INST : entity axis2link_v1_00_a.fifo_32
   fifo_rst <= not aresetn;
   s_axis_tready <= not fifo_full;
 
-  
-  
 
   LINK_ST_PORT_PROCESS   :   process(aresetn, sys_lx_clk)
     begin
@@ -390,7 +417,7 @@ FIFO_INST : entity axis2link_v1_00_a.fifo_32
               link_state <= LINK_PORT_ST_RD;
             end if;
           when READ_STRM_DATA =>
-            if fifo_dout_valid = '1' then
+            if (fifo_dout_valid = '1') then
             link_state <= SEND_BYTE1;
             else
             link_state <= READ_STRM_DATA;
@@ -427,6 +454,7 @@ FIFO_INST : entity axis2link_v1_00_a.fifo_32
         end case;
     end if;
     end process LINK_ST_PORT_PROCESS;
+
     
   LINK_STATE_PROCESS    :   process (link_state) is
     begin 
@@ -504,7 +532,7 @@ FIFO_INST : entity axis2link_v1_00_a.fifo_32
     if Bus2IP_Clk'event and Bus2IP_Clk = '1' then
       if Bus2IP_Resetn = '0' then
         init_reg <= x"AD05_2018"; 
-        divide <= x"0000_0006"; 
+        divide <= x"0000_0002"; 
         slv_reg2 <= (others => '0');
         slv_reg3 <= (others => '0');
       else
