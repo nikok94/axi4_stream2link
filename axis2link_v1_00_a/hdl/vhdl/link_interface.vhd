@@ -58,6 +58,9 @@ use ieee.std_logic_unsigned.all;
 Library UNISIM;
 use UNISIM.vcomponents.all;
 
+library axis2link_v1_00_a;
+use axis2link_v1_00_a.fifo_32;
+
 library proc_common_v3_00_a;
 use proc_common_v3_00_a.proc_common_pkg.all;
 
@@ -111,7 +114,7 @@ entity link_interface is
     s_axis_tvalid                  : in  std_logic:= '0';
     s_axis_tready                  : out std_logic;
     
-    axis_clk_2x                    : in std_logic;
+    sys_lx_clk                     : in std_logic;
     
     Lx_DAT                         : out std_logic_vector(7 downto 0);
     Lx_ACK                         : in std_logic;
@@ -146,18 +149,18 @@ end entity link_interface;
 ------------------------------------------------------------------------------
 -- Architecture section
 ------------------------------------------------------------------------------
-
 architecture IMP of link_interface is
 
   type LINK_PORT_STATE_TYPE         is  (IDLE, LINK_PORT_ST_RD, READ_STRM_DATA, SEND_BYTE1, SEND_BYTE2, SEND_BYTE3, SEND_BYTE4);
   signal link_state                     : LINK_PORT_STATE_TYPE;
+  
+  signal next_link_state                : std_logic;
   --USER signal declarations added here, as needed for user logic
   signal clk_counter                    : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
   signal divide                         : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
   signal link_rst                       : std_logic:= '1';
   signal clk_dev                        : std_logic:='0';
   signal clk_dev_n                      : std_logic:='1';
-  signal link_clk                       : std_logic:='0';
   signal tready_ind                     : std_logic;
   signal rd_clk                         : std_logic:= '0';
   signal rd_clk_count                   : std_logic_vector(1 downto 0):= b"00";
@@ -170,12 +173,33 @@ architecture IMP of link_interface is
   signal strm_data_rd_en                : std_logic:= '0';
   
   signal send_link_data                 : std_logic:= '0';
-  signal Lx_CLK_sts                     : std_logic:= '0';
   signal Lx_CLK_out                     : std_logic:= '0';
+  signal link_clk                       : std_logic:= '0';
+  signal lx_clk_prd_cnt                 : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
   signal Lx_DAT_out                     : std_logic_vector(7 downto 0):= x"00";
+  signal Lx_DAT_out_d                   : std_logic_vector(7 downto 0):= x"00";
   signal Lx_ACK_i                       : std_logic;
-  signal rd_strm_data                   : std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0):= x"0000_0000";
+  signal rd_strm_data                   : std_logic;
   signal tdata                          : std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0):= x"0000_0000";
+  signal Count_trigger                  : std_logic;
+  signal Count_trigger_d1               : std_logic;
+  signal Count_trigger_pulse            : std_logic;
+  
+  signal Ratio_Count                    : std_logic_vector(8-1 downto 0);
+  signal Sync_Set                       : std_logic:='0';
+  
+  signal Dat_trigger                    : std_logic;
+  signal Dat_trigger_d1                 : std_logic;
+  
+  signal Dat_Count                      : std_logic_vector(8-1 downto 0);
+  
+  -- fifo signal
+  signal fifo_rd_en                     : std_logic:= '0';
+  signal fifo_rst                       : std_logic;
+  signal fifo_full                      : std_logic;
+  signal fifo_empty                     : std_logic;
+  signal fifo_dout                      : std_logic_vector(31 downto 0);
+  signal fifo_dout_valid                : std_logic;
   ------------------------------------------
   -- Signals for user logic slave model s/w accessible register example
   ------------------------------------------
@@ -190,106 +214,214 @@ architecture IMP of link_interface is
   signal slv_write_ack                  : std_logic;
 
 begin
-  s_axis_tready <= tready;
-  tready <= strm_data_rd_en when divide = x"0000_0001" else RD_EN;
-  Lx_DAT <= Lx_DAT_out when send_link_data = '1' else x"00";
-  Lx_CLK <= clk_dev when send_link_data = '1' else Lx_CLK_sts;
-  Lx_ACK_i <= Lx_ACK;
+link_rst <= slv_reg2(0);
+
+
+FIFO_INST : entity axis2link_v1_00_a.fifo_32
+  port map(
+    rst => fifo_rst,
+    wr_clk => s_axis_aclk,
+    rd_clk => sys_lx_clk,
+    din => s_axis_tdata,
+    wr_en => s_axis_tvalid,
+    rd_en => fifo_rd_en,
+    dout => fifo_dout,
+    full => fifo_full,
+    empty => fifo_empty,
+    valid => fifo_dout_valid
+  );
   
-  RD_DATA_PROC :  process (s_axis_aclk, aresetn)
+  FIFO_RD_EN_PROC  : process(sys_lx_clk)
   begin 
-  if s_axis_aclk'event and s_axis_aclk = '0' then
-    if (aresetn = '0') then
-      rd_strm_data <= x"0000_0000";
-    elsif tready = '1' then
-      rd_strm_data <= s_axis_tdata;
-    else 
-      rd_strm_data <= rd_strm_data;
-    end if;
+  if(sys_lx_clk'event and sys_lx_clk = '1') then
+          if(aresetn = '0') then
+              fifo_rd_en <= '0';
+          elsif rd_strm_data = '1' then
+              if next_link_state = '1' then
+              fifo_rd_en <= '1';
+              else 
+              fifo_rd_en <= '0';
+              end if;
+          end if;
   end if;
-  end process RD_DATA_PROC;
-  
-  LINK_RST_PROC : process (rd_clk)
+  end process FIFO_RD_EN_PROC;
+ 
+  RATIO_COUNT_PROCESS: process(sys_lx_clk)
   begin
-  if rd_clk'event and rd_clk = '1' then
-    if (aresetn = '0') then
-    link_rst <= '1';
-    elsif slv_reg2(0) = '1' then
-    link_rst <= '1';
-    else 
-    link_rst <= '0';
-    end if;
-  end if;
-  end process LINK_RST_PROC;
-
-  RD_CLK_PROC : process (axis_clk_2x, aresetn)
-  begin
-  if axis_clk_2x'event and axis_clk_2x = '1' then
-    if (aresetn = '0') then
-      rd_clk <= '1';
-    else
-      rd_clk<= not rd_clk;
-    end if;
-  end if;
-  end process RD_CLK_PROC;
-  
-  RD_EN_GEN : process(rd_clk, aresetn)
-  begin
-  if rd_clk'event and rd_clk = '1' then
-    if (aresetn = '0' or strm_data_rd_en = '0') then
-      RD_EN <= '0';
-      RD_EN_count <= b"00";
-    elsif (strm_data_rd_en = '1' and RD_EN_count = b"00")then 
-      RD_EN <= '1';
-      RD_EN_count <= RD_EN_count + 1;
-    else 
-    RD_EN <= '0';
-    RD_EN_count <= RD_EN_count;
-    end if;
-  end if;
-  end process RD_EN_GEN;
-
-      
-  DIVIDE_CLK_INST : process (axis_clk_2x, aresetn, link_rst)
-  begin
-    if axis_clk_2x'event and axis_clk_2x = '1' then
-      if aresetn = '0' or link_rst = '1' then 
-      clk_dev <= '1';
-      clk_counter <= (others => '0');
-      elsif clk_counter = (divide - 1) then 
-      clk_counter <= (others => '0');
-      clk_dev <= not clk_dev;
-      else 
-      clk_counter <= clk_counter + 1;
+      if(sys_lx_clk'event and sys_lx_clk = '1') then
+          if((aresetn = '0') or (link_rst = '1')) then
+              Ratio_Count <= ('0' & divide(7 downto 1))-1;
+          else
+              Ratio_Count <= Ratio_Count - 1;
+              if (Ratio_Count = 0) then
+                  Ratio_Count <= ('0' & divide(7 downto 1))-1;
+              end if;
+          end if;
       end if;
-    end if;
-  end process DIVIDE_CLK_INST;
+  end process RATIO_COUNT_PROCESS;
+  
+   COUNT_TRIGGER_GEN_PROCESS: process(sys_lx_clk)
+  begin
+      if(sys_lx_clk'event and sys_lx_clk = '1') then
+          if((aresetn = '0') or (link_rst = '1')) then
+              Count_trigger <= '0';
+          elsif(Ratio_Count = 0) then
+              Count_trigger <= not Count_trigger;
+          end if;
+      end if;
+  end process COUNT_TRIGGER_GEN_PROCESS;
+
+-------------------------------------------------------------------------------
+-- COUNT_TRIGGER_1CLK_PROCESS : Delay cnt_trigger signal by 1 clock cycle
+-------------------------------
+  COUNT_TRIGGER_1CLK_PROCESS: process(sys_lx_clk)
+  begin
+      if(sys_lx_clk'event and sys_lx_clk = '1') then
+          if ((aresetn = '0') or (link_rst = '1')) then
+              Count_trigger_d1 <= '0';
+          else
+              Count_trigger_d1 <=  Count_trigger;
+          end if;
+      end if;
+  end process COUNT_TRIGGER_1CLK_PROCESS;
+
+ -- generate a trigger pulse for rising edge as well as falling edge
+  Count_trigger_pulse <= (Count_trigger and (not(Count_trigger_d1))) or
+                        ((not(Count_trigger)) and Count_trigger_d1);
+            
+  SCK_SET_RESET_PROCESS: process(sys_lx_clk)
+  begin
+      if(sys_lx_clk'event and sys_lx_clk = '1') then
+          if((aresetn = '0') or (link_rst = '1')) then
+               Lx_CLK_out <= '0';
+          elsif(Sync_Set = '1') then
+               Lx_CLK_out <= '1';
+          elsif (send_link_data = '1') then
+                Lx_CLK_out <= Lx_CLK_out xor Count_trigger_pulse;
+          end if;
+      end if;
+  end process SCK_SET_RESET_PROCESS;
+----------------------------------------------------------------------------
+----------------------------------------------------------------------------
+----------------------------------------------------------------------------
+  DAT_COUNT_PROCESS: process(sys_lx_clk)
+  begin
+      if(sys_lx_clk'event and sys_lx_clk = '1') then
+          if ((aresetn = '0') or (link_rst = '1')) then
+              Dat_Count <= (divide(7 downto 0) - 1);
+          else
+              Dat_Count <= Dat_Count - 1;
+              if (Dat_Count = 0) then
+                  Dat_Count <= (divide(7 downto 0) - 1);
+              end if;
+          end if;
+      end if;
+  end process DAT_COUNT_PROCESS;
+  
+  DAT_TRIGGER_GEN_PROCESS: process(sys_lx_clk)
+  begin
+      if(sys_lx_clk'event and sys_lx_clk = '1') then
+          if((aresetn = '0') or (link_rst = '1')) then
+              Dat_trigger <= '0';
+          elsif(Dat_Count = 0) then
+              Dat_trigger <= not Dat_trigger;
+          end if;
+      end if;
+  end process DAT_TRIGGER_GEN_PROCESS;
+
+-------------------------------------------------------------------------------
+-- COUNT_TRIGGER_1CLK_PROCESS : Delay cnt_trigger signal by 1 clock cycle
+-------------------------------
+  DAT_TRIGGER_1CLK_PROCESS: process(sys_lx_clk)
+  begin
+      if(sys_lx_clk'event and sys_lx_clk = '1') then
+          if((aresetn = '0') or (link_rst = '1')) then
+              Dat_trigger_d1 <= '0';
+          else
+              Dat_trigger_d1 <=  Dat_trigger;
+          end if;
+      end if;
+  end process DAT_TRIGGER_1CLK_PROCESS;
+
+ -- generate a trigger pulse for rising edge as well as falling edge
+
+   next_link_state <= (Dat_trigger and (not(Dat_trigger_d1))) or
+                      ((not(Dat_trigger)) and Dat_trigger_d1);
+
+  DAT_OUT_PROCESS: process(sys_lx_clk)
+  begin
+      if(sys_lx_clk'event and sys_lx_clk = '1') then
+          if((aresetn = '0') or (link_rst = '1')) then
+              Lx_DAT <= (others => '0');
+              Lx_CLK <= '0';
+          elsif divide > x"0000_0003" then
+              Lx_DAT_out_d <= Lx_DAT_out;
+              Lx_DAT <= Lx_DAT_out_d;
+              Lx_CLK <= Lx_CLK_out;
+          else
+              Lx_DAT <= Lx_DAT_out;
+              Lx_CLK <= Lx_CLK_out;
+          end if;
+      end if;
+  end process DAT_OUT_PROCESS;
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+
+
+  fifo_rst <= not aresetn;
+  s_axis_tready <= not fifo_full;
+
+  
   
 
-  LINK_ST_PORT_PROCESS   :   process(link_rst,clk_dev, s_axis_tvalid, Lx_ACK_i)
+  LINK_ST_PORT_PROCESS   :   process(aresetn, sys_lx_clk)
     begin
-    if aresetn = '0' or link_rst = '1' then
+    if aresetn = '0' then
         link_state <=  IDLE;
-    elsif (clk_dev'event and clk_dev = '1') then
+    elsif (sys_lx_clk'event and sys_lx_clk = '0') then
         case link_state is
           when IDLE => 
               link_state <= LINK_PORT_ST_RD;
           when LINK_PORT_ST_RD => 
-            if ((Lx_ACK_i = '1') and (s_axis_tvalid = '1')) then
+            if (Lx_ACK = '1') and (next_link_state = '1') then
               link_state <= READ_STRM_DATA;
             else 
               link_state <= LINK_PORT_ST_RD;
             end if;
           when READ_STRM_DATA =>
+            if fifo_dout_valid = '1' then
             link_state <= SEND_BYTE1;
+            else
+            link_state <= READ_STRM_DATA;
+            end if;
           when SEND_BYTE1 =>
+            if next_link_state = '1' then
             link_state <= SEND_BYTE2;
+            else 
+            link_state <= SEND_BYTE1;
+            end if;
           when SEND_BYTE2 =>
+            if next_link_state = '1' then
             link_state <= SEND_BYTE3;
+            else 
+            link_state <= SEND_BYTE2;
+            end if;
           when SEND_BYTE3 =>
+            if next_link_state = '1' then
             link_state <= SEND_BYTE4;
+            else 
+            link_state <= SEND_BYTE3;
+            end if;
           when SEND_BYTE4 =>
+          if next_link_state = '1'then
+            if (Lx_ACK = '0') then
             link_state <= LINK_PORT_ST_RD;
+            else 
+            link_state <= READ_STRM_DATA;
+            end if;
+            else link_state <= SEND_BYTE4;
+          end if;
           when others =>
             link_state <= IDLE;
         end case;
@@ -300,36 +432,44 @@ begin
     begin 
     case link_state is
         when IDLE =>
-          Lx_CLK_sts <= '0';
-          strm_data_rd_en <= '0';
+          Sync_Set <='0';
+          rd_strm_data <= '0';
           send_link_data <= '0';
+          Lx_DAT_out <= (others => '0');
         when LINK_PORT_ST_RD =>
-          Lx_CLK_sts <= '1';
+          Lx_DAT_out <= (others => '0');
+          Sync_Set <= '1';
           send_link_data <= '0';
-          strm_data_rd_en <= '0';
+          rd_strm_data <= '0';
         when READ_STRM_DATA =>
-          Lx_CLK_sts <= '1';
+          Lx_DAT_out <= (others => '0');
           send_link_data <= '0';
-          strm_data_rd_en <= '1';
+          Sync_Set <= '1';
+          rd_strm_data <= '1';
         when SEND_BYTE1 =>
           send_link_data <= '1';
-          strm_data_rd_en <= '0';
-          Lx_DAT_out <= rd_strm_data(31 downto 24);
+          Sync_Set <= '0';
+          rd_strm_data <= '0';
+          Lx_DAT_out <= fifo_dout(31 downto 24);
         when SEND_BYTE2 =>
+          Sync_Set <= '0';
           send_link_data <= '1';
-          strm_data_rd_en <= '0';
-          Lx_DAT_out <= rd_strm_data(23 downto 16);
+          rd_strm_data <= '0';
+          Lx_DAT_out <= fifo_dout(23 downto 16);
         when SEND_BYTE3 =>
+          Sync_Set <= '0';
           send_link_data <= '1';
-          strm_data_rd_en <= '0';
-          Lx_DAT_out <= rd_strm_data(15 downto 8);
+          rd_strm_data <= '0';
+          Lx_DAT_out <= fifo_dout(15 downto 8);
         when SEND_BYTE4 =>
+          Sync_Set <= '0';
           send_link_data <= '1';
-          strm_data_rd_en <= '0';
-          Lx_DAT_out <= rd_strm_data(7 downto 0);
+          rd_strm_data <= '0';
+          Lx_DAT_out <= fifo_dout(7 downto 0);
         when others =>
-          Lx_CLK_sts <= '0';
-          strm_data_rd_en <= '0';
+          Lx_DAT_out <= (others => '0');
+          Sync_Set <= '0';
+          rd_strm_data <= '0';
           send_link_data <= '0';
       end case;
     end process LINK_STATE_PROCESS;
@@ -364,7 +504,7 @@ begin
     if Bus2IP_Clk'event and Bus2IP_Clk = '1' then
       if Bus2IP_Resetn = '0' then
         init_reg <= x"AD05_2018"; 
-        divide <= x"0000_0001"; 
+        divide <= x"0000_0006"; 
         slv_reg2 <= (others => '0');
         slv_reg3 <= (others => '0');
       else
@@ -372,14 +512,18 @@ begin
           when "1000" =>
             init_reg <= init_reg; 
           when "0100" =>
-          if Bus2IP_Data /= x"0000_0000" then 
-            for byte_index in 0 to (C_SLV_DWIDTH/8)-1 loop
-              if ( Bus2IP_BE(byte_index) = '1' ) then
-                divide(byte_index*8+7 downto byte_index*8) <= Bus2IP_Data(byte_index*8+7 downto byte_index*8);
-              end if;
-            end loop;
-          else 
-            divide <= divide; 
+          if link_rst = '1' then
+            if Bus2IP_Data >= x"0000_0002" then 
+                for byte_index in 0 to (C_SLV_DWIDTH/8)-1 loop
+                if ( Bus2IP_BE(byte_index) = '1' ) then
+                    divide(byte_index*8+7 downto byte_index*8) <= Bus2IP_Data(byte_index*8+7 downto byte_index*8);
+                end if;
+                end loop;
+            else 
+                divide <= divide; 
+            end if;
+          else
+          divide <= divide;
           end if;
           when "0010" =>
             for byte_index in 0 to (C_SLV_DWIDTH/8)-1 loop
