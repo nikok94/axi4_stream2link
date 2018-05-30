@@ -118,6 +118,7 @@ entity axis2link is
     --USER generics added here
     C_S_AXIS_CLK_FREQ_HZ           : integer              := 100_000_000;
     C_S_AXIS_TDATA_WIDTH           : integer              := 32;
+    C_FIFO_DEPTH                   : integer              := 256;
     -- ADD USER GENERICS ABOVE THIS LINE ---------------
 
     -- DO NOT EDIT BELOW THIS LINE ---------------------
@@ -312,6 +313,7 @@ begin
       C_FAMILY                       => C_FAMILY,
       C_S_AXIS_CLK_FREQ_HZ           => C_S_AXIS_CLK_FREQ_HZ,
       C_S_AXIS_TDATA_WIDTH           => C_S_AXIS_TDATA_WIDTH,
+      C_FIFO_DEPTH                   => C_FIFO_DEPTH,
       -- MAP USER GENERICS ABOVE THIS LINE ---------------
       C_NUM_REG                      => USER_NUM_REG,
       C_SLV_DWIDTH                   => USER_SLV_DWIDTH

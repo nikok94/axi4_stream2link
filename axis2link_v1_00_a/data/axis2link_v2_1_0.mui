@@ -56,6 +56,15 @@
         <tip></tip>
     </widget>
     '>
+    
+    <!ENTITY C_FIFO_DEPTH '
+    <widget id="C_FIFO_DEPTH">
+        <key>C_FIFO_DEPTH</key>
+        <label>Stream FIFO Depth</label>
+        <tip></tip>
+    </widget>
+    '>
+    
     <!ENTITY C_S_AXI_PROTOCOL '
         <widget id="C_S_AXI_PROTOCOL">
         <key>C_S_AXI_PROTOCOL</key>
@@ -69,7 +78,7 @@
     <view id="User">
         <display>User</display>
         <group id="Addresses">
-            <display>AXI-Stream Slave Settings</display>
+            <display>Addresses</display>
             <item>&C_BASEADDR;</item>
             <item>&C_HIGHADDR;</item>
         </group>	
@@ -85,6 +94,7 @@
             <display>AXI-Stream</display>
             <item>&C_S_AXIS_CLK_FREQ_HZ;</item>
             <item>&C_S_AXIS_TDATA_WIDTH;</item>
+            <item>&C_FIFO_DEPTH;</item>
         </group>	
 
     </view>

@@ -99,6 +99,7 @@ entity link_interface is
     C_FAMILY                       : string               := "spartan6";
     C_S_AXIS_CLK_FREQ_HZ           : integer              := 100_000_000;
     C_S_AXIS_TDATA_WIDTH           : integer              := 32;
+    C_FIFO_DEPTH                   : integer              := 256;
 
     -- DO NOT EDIT BELOW THIS LINE ---------------------
     -- Bus protocol parameters, do not add to or delete
@@ -221,19 +222,12 @@ link_rst <= slv_reg2(0);
 FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
   generic map(
     C_FAMILY              => C_FAMILY,
-    --C_FIFO_DEPTH          => 256,
-    --C_PROG_FULL_THRESH    => 128,
-    C_DATA_WIDTH          => C_S_AXIS_TDATA_WIDTH
-    --C_PTR_WIDTH           => 8,
-    --C_MEMORY_TYPE         => 2,
-    --C_COMMON_CLOCK        => 0,
-    --C_IMPLEMENTATION_TYPE => 1,
-    --C_SYNCHRONIZER_STAGE  => 1
+    C_DATA_WIDTH          => C_S_AXIS_TDATA_WIDTH,
+    C_FIFO_DEPTH          => C_FIFO_DEPTH
   )
   port map(
     rst => fifo_rst,
     wr_clk => s_axis_aclk,
---    sync_clk => sys_lx_clk,
     rd_clk => sys_lx_clk,
     din => s_axis_tdata,
     wr_en => s_axis_tvalid,
@@ -241,25 +235,11 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
     dout => fifo_dout,
     full => fifo_full,
     empty => fifo_empty,
-    valid => fifo_dout_valid,
-    prog_full => open
+    valid => fifo_dout_valid
   );
 
 
---FIFO_INST : entity axis2link_v1_00_a.fifo_32
---  port map(
---    rst => fifo_rst,
---    wr_clk => s_axis_aclk,
---    rd_clk => sys_lx_clk,
---    din => s_axis_tdata,
---    wr_en => s_axis_tvalid,
---    rd_en => fifo_rd_en,
---    dout => fifo_dout,
---    full => fifo_full,
---    empty => fifo_empty,
---    valid => fifo_dout_valid
---  );
-  
+
   FIFO_RD_EN_PROC  : process(sys_lx_clk)
   begin 
   if(sys_lx_clk'event and sys_lx_clk = '1') then
