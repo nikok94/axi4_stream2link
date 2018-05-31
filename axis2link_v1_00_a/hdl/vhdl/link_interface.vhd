@@ -154,10 +154,10 @@ end entity link_interface;
 ------------------------------------------------------------------------------
 architecture IMP of link_interface is
 
-  type LINK_PORT_STATE_TYPE         is  (IDLE, LINK_PORT_ST_RD, READ_STRM_DATA, SEND_BYTE1, SEND_BYTE2, SEND_BYTE3, SEND_BYTE4);
-  signal link_state                     : LINK_PORT_STATE_TYPE;
-  
-  signal next_link_state                : std_logic;
+    type LINK_PORT_STATE_TYPE         is  (IDLE, LINK_PORT_ST_RD, READ_STRM_DATA, START_SEND, SEND_BYTE1_N, SEND_BYTE2_P, SEND_BYTE2_N,
+                                         SEND_BYTE3_P, SEND_BYTE3_N, SEND_BYTE4_P, SEND_BYTE4_N);
+    signal link_state, next_link_state    : LINK_PORT_STATE_TYPE;
+
   --USER signal declarations added here, as needed for user logic
   signal clk_counter                    : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
   signal divide                         : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
@@ -188,6 +188,7 @@ architecture IMP of link_interface is
   signal Count_trigger_d1               : std_logic;
   signal Count_trigger_pulse            : std_logic;
   
+  signal baud_en                        : std_logic;
   signal Ratio_Count                    : std_logic_vector(8-1 downto 0);
   signal Sync_Set                       : std_logic:='0';
   
@@ -197,6 +198,7 @@ architecture IMP of link_interface is
   signal Dat_Count                      : std_logic_vector(8-1 downto 0);
   
   -- fifo signal
+
   signal fifo_rd_en                     : std_logic:= '0';
   signal fifo_rst                       : std_logic;
   signal fifo_full                      : std_logic;
@@ -217,13 +219,16 @@ architecture IMP of link_interface is
   signal slv_write_ack                  : std_logic;
 
 begin
-link_rst <= slv_reg2(0);
+  link_rst <= slv_reg2(0);
+  fifo_rst <= not aresetn;
+  s_axis_tready <= not fifo_full;
+  fifo_rd_en <= (not fifo_dout_valid) and rd_strm_data;
 
 FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
   generic map(
     C_FAMILY              => C_FAMILY,
-    C_DATA_WIDTH          => C_S_AXIS_TDATA_WIDTH,
-    C_FIFO_DEPTH          => C_FIFO_DEPTH
+  --  C_FIFO_DEPTH          => C_FIFO_DEPTH,
+    C_DATA_WIDTH          => C_S_AXIS_TDATA_WIDTH
   )
   port map(
     rst => fifo_rst,
@@ -238,26 +243,20 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
     valid => fifo_dout_valid
   );
 
-
-
-  FIFO_RD_EN_PROC  : process(sys_lx_clk)
+  FIFO_RD_DATA_PROC  : process(sys_lx_clk)
   begin 
-  if(sys_lx_clk'event and sys_lx_clk = '1') then
+  if (rising_edge(sys_lx_clk)) then
           if(aresetn = '0') then
-              fifo_rd_en <= '0';
-          elsif rd_strm_data = '1' then
-              if next_link_state = '1' then
-              fifo_rd_en <= '1';
-              else 
-              fifo_rd_en <= '0';
-              end if;
+              tdata <= (others=>'0');
+          elsif fifo_dout_valid = '1' then
+              tdata <= fifo_dout;
           end if;
   end if;
-  end process FIFO_RD_EN_PROC;
+  end process FIFO_RD_DATA_PROC;
   
   RATIO_COUNT_PROCESS: process(sys_lx_clk)
   begin
-      if(sys_lx_clk'event and sys_lx_clk = '1') then
+      if (rising_edge(sys_lx_clk)) then
           if((aresetn = '0') or (link_rst = '1')) then
               Ratio_Count <= ('0' & divide(7 downto 1))-1;
           else
@@ -271,7 +270,7 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
   
    COUNT_TRIGGER_GEN_PROCESS: process(sys_lx_clk)
   begin
-      if(sys_lx_clk'event and sys_lx_clk = '1') then
+      if (rising_edge(sys_lx_clk)) then
           if((aresetn = '0') or (link_rst = '1')) then
               Count_trigger <= '0';
           elsif(Ratio_Count = 0) then
@@ -285,7 +284,7 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
 -------------------------------
   COUNT_TRIGGER_1CLK_PROCESS: process(sys_lx_clk)
   begin
-      if(sys_lx_clk'event and sys_lx_clk = '1') then
+      if (rising_edge(sys_lx_clk)) then
           if ((aresetn = '0') or (link_rst = '1')) then
               Count_trigger_d1 <= '0';
           else
@@ -294,28 +293,14 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
       end if;
   end process COUNT_TRIGGER_1CLK_PROCESS;
 
- -- generate a trigger pulse for rising edge as well as falling edge
   Count_trigger_pulse <= (Count_trigger and (not(Count_trigger_d1))) or
-                        ((not(Count_trigger)) and Count_trigger_d1);
-            
-  SCK_SET_RESET_PROCESS: process(sys_lx_clk)
-  begin
-      if(sys_lx_clk'event and sys_lx_clk = '1') then
-          if((aresetn = '0') or (link_rst = '1')) then
-               Lx_CLK_out <= '0';
-          elsif(Sync_Set = '1') then
-               Lx_CLK_out <= '1';
-          elsif (send_link_data = '1') then
-                Lx_CLK_out <= Lx_CLK_out xor Count_trigger_pulse;
-          end if;
-      end if;
-  end process SCK_SET_RESET_PROCESS;
+                         ((not(Count_trigger)) and Count_trigger_d1);
 ----------------------------------------------------------------------------
 ----------------------------------------------------------------------------
 ----------------------------------------------------------------------------
   DAT_COUNT_PROCESS: process(sys_lx_clk)
   begin
-      if(sys_lx_clk'event and sys_lx_clk = '1') then
+      if(rising_edge(sys_lx_clk)) then
           if ((aresetn = '0') or (link_rst = '1')) then
               Dat_Count <= (divide(7 downto 0) - 1);
           else
@@ -329,7 +314,7 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
   
   DAT_TRIGGER_GEN_PROCESS: process(sys_lx_clk)
   begin
-      if(sys_lx_clk'event and sys_lx_clk = '1') then
+      if(rising_edge(sys_lx_clk)) then
           if((aresetn = '0') or (link_rst = '1')) then
               Dat_trigger <= '0';
           elsif(Dat_Count = 0) then
@@ -343,7 +328,7 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
 -------------------------------
   DAT_TRIGGER_1CLK_PROCESS: process(sys_lx_clk)
   begin
-      if(sys_lx_clk'event and sys_lx_clk = '1') then
+      if(rising_edge(sys_lx_clk)) then
           if((aresetn = '0') or (link_rst = '1')) then
               Dat_trigger_d1 <= '0';
           else
@@ -354,133 +339,142 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
 
  -- generate a trigger pulse for rising edge as well as falling edge
 
-   next_link_state <= (Dat_trigger and (not(Dat_trigger_d1))) or
+   baud_en <= (Dat_trigger and (not(Dat_trigger_d1))) or
                       ((not(Dat_trigger)) and Dat_trigger_d1);
-
-  DAT_OUT_PROCESS: process(sys_lx_clk)
-  begin
-      if(sys_lx_clk'event and sys_lx_clk = '1') then
-          if((aresetn = '0') or (link_rst = '1')) then
-              Lx_DAT <= (others => '0');
-              Lx_CLK <= '0';
-          elsif divide > x"0000_0003" then
-              Lx_DAT_out_d <= Lx_DAT_out;
-              Lx_DAT <= Lx_DAT_out_d;
-              Lx_CLK <= Lx_CLK_out;
-          else
-              Lx_DAT <= Lx_DAT_out;
-              Lx_CLK <= Lx_CLK_out;
-          end if;
-      end if;
-  end process DAT_OUT_PROCESS;
 -------------------------------------------------------------------------------
 -------------------------------------------------------------------------------
 -------------------------------------------------------------------------------
 
+-------------------------------------------------------------------------------
+-- FSM
+-------------------------------------------------------------------------------
 
-  fifo_rst <= not aresetn;
-  s_axis_tready <= not fifo_full;
-
-
-  LINK_ST_PORT_PROCESS   :   process(aresetn, sys_lx_clk)
-    begin
-    if aresetn = '0' then
-        link_state <=  IDLE;
-    elsif (sys_lx_clk'event and sys_lx_clk = '0') then
-        case link_state is
-          when IDLE => 
-              link_state <= LINK_PORT_ST_RD;
-          when LINK_PORT_ST_RD => 
-            if (Lx_ACK = '1') and (next_link_state = '1') then
-              link_state <= READ_STRM_DATA;
-            else 
-              link_state <= LINK_PORT_ST_RD;
-            end if;
-          when READ_STRM_DATA =>
-            if (fifo_dout_valid = '1') then
-            link_state <= SEND_BYTE1;
-            else
-            link_state <= READ_STRM_DATA;
-            end if;
-          when SEND_BYTE1 =>
-            if next_link_state = '1' then
-            link_state <= SEND_BYTE2;
-            else 
-            link_state <= SEND_BYTE1;
-            end if;
-          when SEND_BYTE2 =>
-            if next_link_state = '1' then
-            link_state <= SEND_BYTE3;
-            else 
-            link_state <= SEND_BYTE2;
-            end if;
-          when SEND_BYTE3 =>
-            if next_link_state = '1' then
-            link_state <= SEND_BYTE4;
-            else 
-            link_state <= SEND_BYTE3;
-            end if;
-          when SEND_BYTE4 =>
-          if next_link_state = '1'then
-            if (Lx_ACK = '0') then
-            link_state <= LINK_PORT_ST_RD;
-            else 
-            link_state <= READ_STRM_DATA;
-            end if;
-            else link_state <= SEND_BYTE4;
-          end if;
-          when others =>
+   FSM_SYNC_PROC: process (sys_lx_clk)
+   begin
+      if rising_edge(sys_lx_clk) then
+         if ((aresetn = '0') or (link_rst = '1')) then
             link_state <= IDLE;
-        end case;
-    end if;
-    end process LINK_ST_PORT_PROCESS;
-
-    
-  LINK_STATE_PROCESS    :   process (link_state) is
-    begin 
-    case link_state is
-        when IDLE =>
-          Sync_Set <='0';
-          rd_strm_data <= '0';
-          send_link_data <= '0';
-          Lx_DAT_out <= (others => '0');
-        when LINK_PORT_ST_RD =>
-          Lx_DAT_out <= (others => '0');
-          Sync_Set <= '1';
-          send_link_data <= '0';
-          rd_strm_data <= '0';
-        when READ_STRM_DATA =>
-          Lx_DAT_out <= (others => '0');
-          send_link_data <= '0';
-          Sync_Set <= '1';
-          rd_strm_data <= '1';
-        when SEND_BYTE1 =>
-          send_link_data <= '1';
-          Sync_Set <= '0';
-          rd_strm_data <= '0';
-          Lx_DAT_out <= fifo_dout(31 downto 24);
-        when SEND_BYTE2 =>
-          Sync_Set <= '0';
-          send_link_data <= '1';
-          rd_strm_data <= '0';
-          Lx_DAT_out <= fifo_dout(23 downto 16);
-        when SEND_BYTE3 =>
-          Sync_Set <= '0';
-          send_link_data <= '1';
-          rd_strm_data <= '0';
-          Lx_DAT_out <= fifo_dout(15 downto 8);
-        when SEND_BYTE4 =>
-          Sync_Set <= '0';
-          send_link_data <= '1';
-          rd_strm_data <= '0';
-          Lx_DAT_out <= fifo_dout(7 downto 0);
-        when others =>
-          Lx_DAT_out <= (others => '0');
-          Sync_Set <= '0';
-          rd_strm_data <= '0';
-          send_link_data <= '0';
+            Lx_DAT <= (others => '0');
+            Lx_CLK <= '0';
+         else
+            link_state <= next_link_state;
+            Lx_DAT <= Lx_DAT_out;
+            Lx_CLK <= Lx_CLK_out;
+         end if;        
+      end if;
+   end process;
+   
+   FSM_OUTPUT_DECODE: process (link_state, tdata)
+   begin
+      if link_state = IDLE then
+         Lx_CLK_out <= '0';
+         Lx_DAT_out <= (others => '0');
+         rd_strm_data <= '0';
+      elsif link_state = LINK_PORT_ST_RD then
+         Lx_CLK_out <= '1';
+         Lx_DAT_out <= (others => '0');
+         rd_strm_data <= '0';
+      elsif link_state = READ_STRM_DATA then
+         Lx_CLK_out <= '1';
+         Lx_DAT_out <= tdata(31 downto 24);
+         rd_strm_data <= '1';
+      elsif link_state = START_SEND then
+         Lx_CLK_out <= '1';
+         rd_strm_data <= '0';
+         Lx_DAT_out <= tdata(31 downto 24);
+      elsif link_state = SEND_BYTE1_N then
+         Lx_CLK_out <= '0';
+         Lx_DAT_out <= tdata(31 downto 24);
+         rd_strm_data <= '0';
+      elsif link_state = SEND_BYTE2_P then
+         Lx_CLK_out <= '1';
+         Lx_DAT_out <= tdata(23 downto 16);
+         rd_strm_data <= '0';
+      elsif link_state = SEND_BYTE2_N then
+         Lx_CLK_out <= '0';
+         Lx_DAT_out <= tdata(23 downto 16);
+         rd_strm_data <= '0';
+      elsif link_state = SEND_BYTE3_P then
+         Lx_CLK_out <= '1';
+         Lx_DAT_out <= tdata(15 downto 8);
+         rd_strm_data <= '0';
+      elsif link_state = SEND_BYTE3_N then
+         Lx_CLK_out <= '0';
+         Lx_DAT_out <= tdata(15 downto 8);
+         rd_strm_data <= '0';
+      elsif link_state = SEND_BYTE4_P then
+         Lx_CLK_out <= '1';
+         Lx_DAT_out <= tdata(7 downto 0);
+         rd_strm_data <= '0';
+      elsif link_state = SEND_BYTE4_N then
+         Lx_CLK_out <= '0';
+         Lx_DAT_out <= tdata(7 downto 0);
+         rd_strm_data <= '0';
+      else
+         Lx_CLK_out <= '0';
+         Lx_DAT_out <= (others => '0');
+         rd_strm_data <= '0';
+      end if;
+   end process;
+ 
+   FSM_NEXT_STATE_DECODE: process (link_state, aresetn, Lx_ACK, fifo_dout_valid, baud_en, Count_trigger_pulse)
+   begin
+      next_link_state <= link_state; 
+      case (link_state) is
+         when IDLE =>
+            if aresetn = '1' then
+               next_link_state <= LINK_PORT_ST_RD;
+            end if;
+         when LINK_PORT_ST_RD =>
+            if Lx_ACK = '1' then
+               next_link_state <= READ_STRM_DATA;
+            end if;
+         when READ_STRM_DATA =>
+            if ((baud_en = '1') and (fifo_dout_valid = '1')) then
+               next_link_state <= SEND_BYTE1_N;
+            elsif ((baud_en = '0') and (fifo_dout_valid = '1')) then
+               next_link_state <= START_SEND;
+            end if;
+         when START_SEND =>
+            if baud_en = '1' then
+               next_link_state <= SEND_BYTE1_N;
+            end if;
+         when SEND_BYTE1_N =>
+            if Count_trigger_pulse = '1' then 
+               next_link_state <= SEND_BYTE2_P;
+            end if;
+         when SEND_BYTE2_P =>
+            if Count_trigger_pulse = '1' then 
+               next_link_state <= SEND_BYTE2_N;
+            end if;
+         when SEND_BYTE2_N =>
+            if Count_trigger_pulse = '1' then 
+               next_link_state <= SEND_BYTE3_P;
+            end if;
+         when SEND_BYTE3_P =>
+            if Count_trigger_pulse = '1' then 
+               next_link_state <= SEND_BYTE3_N;
+            end if;
+         when SEND_BYTE3_N =>
+            if Count_trigger_pulse = '1' then 
+               next_link_state <= SEND_BYTE4_P;
+            end if;
+         when SEND_BYTE4_P =>
+            if Count_trigger_pulse = '1' then 
+               next_link_state <= SEND_BYTE4_N;
+            end if;
+         when SEND_BYTE4_N =>
+            if Count_trigger_pulse = '1' then 
+               if (Lx_ACK = '0') then
+               next_link_state <= LINK_PORT_ST_RD;
+               else
+               next_link_state <= READ_STRM_DATA;
+               end if;
+            end if;
+         when others =>
+               next_link_state <= IDLE;
       end case;
-    end process LINK_STATE_PROCESS;
+   end process;
     
   ------------------------------------------
   -- Example code to read/write user logic slave model s/w accessible registers
@@ -512,7 +506,7 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
     if Bus2IP_Clk'event and Bus2IP_Clk = '1' then
       if Bus2IP_Resetn = '0' then
         init_reg <= x"AD05_2018"; 
-        divide <= x"0000_0002"; 
+        divide <= x"0000_0006"; 
         slv_reg2 <= (others => '0');
         slv_reg3 <= (others => '0');
       else
@@ -521,7 +515,7 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
             init_reg <= init_reg; 
           when "0100" =>
           if link_rst = '1' then
-            if Bus2IP_Data >= x"0000_0002" then 
+            if Bus2IP_Data >= x"0000_0004" then 
                 for byte_index in 0 to (C_SLV_DWIDTH/8)-1 loop
                 if ( Bus2IP_BE(byte_index) = '1' ) then
                     divide(byte_index*8+7 downto byte_index*8) <= Bus2IP_Data(byte_index*8+7 downto byte_index*8);

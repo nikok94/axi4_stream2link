@@ -66,7 +66,7 @@ ENTITY axis_async_fifo IS
     -- Generic Declarations
     -------------------------------------------------------------------------
     C_FAMILY              : STRING  := "kintex7";
-  --  C_FIFO_DEPTH          : INTEGER := 256;	 
+    C_FIFO_DEPTH          : INTEGER := 256;	 
   --  C_PROG_FULL_THRESH    : INTEGER := 128;
     C_DATA_WIDTH          : INTEGER := 52
   --  C_PTR_WIDTH           : INTEGER := 8;
@@ -86,8 +86,7 @@ ENTITY axis_async_fifo IS
     dout      : OUT STD_LOGIC_VECTOR(C_DATA_WIDTH-1 DOWNTO 0);
     full      : OUT STD_LOGIC;
     empty     : OUT STD_LOGIC;
-    valid     : OUT STD_LOGIC;
-    prog_full : OUT STD_LOGIC
+    valid     : OUT STD_LOGIC
   );
 END axis_async_fifo;
 
@@ -814,7 +813,7 @@ U0 : FIFO_GENERATOR_V9_1
     DOUT                           => dout,
     FULL                           => full,
     EMPTY                          => empty,
-    PROG_FULL                      => prog_full,
+    PROG_FULL                      => open,
 
     BACKUP                         => '0',
     BACKUP_MARKER                  => '0',
