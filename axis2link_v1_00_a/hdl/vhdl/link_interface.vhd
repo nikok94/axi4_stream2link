@@ -376,7 +376,7 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
          rd_strm_data <= '0';
       elsif link_state = READ_STRM_DATA then
          Lx_CLK_out <= '1';
-         Lx_DAT_out <= tdata(31 downto 24);
+         Lx_DAT_out <= (others=> '0');
          rd_strm_data <= '1';
       elsif link_state = START_SEND then
          Lx_CLK_out <= '1';
@@ -506,7 +506,7 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
     if Bus2IP_Clk'event and Bus2IP_Clk = '1' then
       if Bus2IP_Resetn = '0' then
         init_reg <= x"AD05_2018"; 
-        divide <= x"0000_0006"; 
+        divide <= x"0000_0004"; 
         slv_reg2 <= (others => '0');
         slv_reg3 <= (others => '0');
       else
@@ -515,7 +515,7 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
             init_reg <= init_reg; 
           when "0100" =>
           if link_rst = '1' then
-            if Bus2IP_Data >= x"0000_0004" then 
+            if Bus2IP_Data >= x"0000_0002" then 
                 for byte_index in 0 to (C_SLV_DWIDTH/8)-1 loop
                 if ( Bus2IP_BE(byte_index) = '1' ) then
                     divide(byte_index*8+7 downto byte_index*8) <= Bus2IP_Data(byte_index*8+7 downto byte_index*8);
