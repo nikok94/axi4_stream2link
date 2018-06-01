@@ -149,14 +149,14 @@ entity axis2link is
     s_axis_tvalid                  : in  std_logic:= '0';
     s_axis_tready                  : out std_logic;
     
-    sys_lx_clk                    : in std_logic;
+    sys_lx_clk2x                    : in std_logic;
     
     Lx_DAT                         : out std_logic_vector(7 downto 0);
     Lx_ACK                         : in std_logic;
     Lx_CLK                         : out std_logic;
     -- ADD USER PORTS ABOVE THIS LINE ------------------
 
-    -- DO NOT EDIT BELOW THIS LINE ---------------------sys_lx_clk
+    -- DO NOT EDIT BELOW THIS LINE ---------------------sys_lx_clk2x
     -- Bus protocol ports, do not add to or delete
     S_AXI_ACLK                     : in  std_logic;
     S_AXI_ARESETN                  : in  std_logic;
@@ -330,7 +330,7 @@ begin
       Lx_DAT                         => Lx_DAT,
       Lx_ACK                         => Lx_ACK,
       Lx_CLK                         => Lx_CLK,
-      sys_lx_clk                    => sys_lx_clk    ,
+      sys_lx_clk2x                    => sys_lx_clk2x    ,
       -- MAP USER PORTS ABOVE THIS LINE ------------------
 
       Bus2IP_Clk                     => ipif_Bus2IP_Clk,

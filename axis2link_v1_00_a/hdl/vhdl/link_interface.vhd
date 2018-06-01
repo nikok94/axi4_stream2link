@@ -117,7 +117,7 @@ entity link_interface is
     s_axis_tvalid                  : in  std_logic:= '0';
     s_axis_tready                  : out std_logic;
     
-    sys_lx_clk                     : in std_logic;
+    sys_lx_clk2x                     : in std_logic;
     
     Lx_DAT                         : out std_logic_vector(7 downto 0);
     Lx_ACK                         : in std_logic;
@@ -159,42 +159,24 @@ architecture IMP of link_interface is
     signal link_state, next_link_state    : LINK_PORT_STATE_TYPE;
 
   --USER signal declarations added here, as needed for user logic
-  signal clk_counter                    : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
+
   signal divide                         : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
   signal link_rst                       : std_logic:= '1';
-  signal clk_dev                        : std_logic:='0';
-  signal clk_dev_n                      : std_logic:='1';
-  signal tready_ind                     : std_logic;
-  signal rd_clk                         : std_logic:= '0';
-  signal rd_clk_count                   : std_logic_vector(1 downto 0):= b"00";
-  --FIFO signals
-  signal RD_EN                          : std_logic;
-  signal RD_EN_count                    : std_logic_vector(1 downto 0);
-  
-  signal tready                         : std_logic:= '0';
-  
-  signal strm_data_rd_en                : std_logic:= '0';
-  
-  signal send_link_data                 : std_logic:= '0';
+   --FIFO signals
   signal Lx_CLK_out                     : std_logic:= '0';
-  signal link_clk                       : std_logic:= '0';
-  signal lx_clk_prd_cnt                 : std_logic_vector(C_SLV_DWIDTH-1 downto 0);
   signal Lx_DAT_out                     : std_logic_vector(7 downto 0):= x"00";
-  signal Lx_DAT_out_d                   : std_logic_vector(7 downto 0):= x"00";
-  signal Lx_ACK_i                       : std_logic;
   signal rd_strm_data                   : std_logic;
   signal tdata                          : std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0):= x"0000_0000";
   signal Count_trigger                  : std_logic;
   signal Count_trigger_d1               : std_logic;
   signal Count_trigger_pulse            : std_logic;
-  
-  signal baud_en                        : std_logic;
+
   signal Ratio_Count                    : std_logic_vector(8-1 downto 0);
   signal Sync_Set                       : std_logic:='0';
   
   signal Dat_trigger                    : std_logic;
   signal Dat_trigger_d1                 : std_logic;
-  
+  signal baud_en                        : std_logic;
   signal Dat_Count                      : std_logic_vector(8-1 downto 0);
   
   -- fifo signal
@@ -233,7 +215,7 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
   port map(
     rst => fifo_rst,
     wr_clk => s_axis_aclk,
-    rd_clk => sys_lx_clk,
+    rd_clk => sys_lx_clk2x,
     din => s_axis_tdata,
     wr_en => s_axis_tvalid,
     rd_en => fifo_rd_en,
@@ -243,9 +225,9 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
     valid => fifo_dout_valid
   );
 
-  FIFO_RD_DATA_PROC  : process(sys_lx_clk)
+  FIFO_RD_DATA_PROC  : process(sys_lx_clk2x)
   begin 
-  if (rising_edge(sys_lx_clk)) then
+  if (rising_edge(sys_lx_clk2x)) then
           if(aresetn = '0') then
               tdata <= (others=>'0');
           elsif fifo_dout_valid = '1' then
@@ -254,9 +236,9 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
   end if;
   end process FIFO_RD_DATA_PROC;
   
-  RATIO_COUNT_PROCESS: process(sys_lx_clk)
+  RATIO_COUNT_PROCESS: process(sys_lx_clk2x)
   begin
-      if (rising_edge(sys_lx_clk)) then
+      if (rising_edge(sys_lx_clk2x)) then
           if((aresetn = '0') or (link_rst = '1')) then
               Ratio_Count <= ('0' & divide(7 downto 1))-1;
           else
@@ -268,9 +250,9 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
       end if;
   end process RATIO_COUNT_PROCESS;
   
-   COUNT_TRIGGER_GEN_PROCESS: process(sys_lx_clk)
+   COUNT_TRIGGER_GEN_PROCESS: process(sys_lx_clk2x)
   begin
-      if (rising_edge(sys_lx_clk)) then
+      if (rising_edge(sys_lx_clk2x)) then
           if((aresetn = '0') or (link_rst = '1')) then
               Count_trigger <= '0';
           elsif(Ratio_Count = 0) then
@@ -282,9 +264,9 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
 -------------------------------------------------------------------------------
 -- COUNT_TRIGGER_1CLK_PROCESS : Delay cnt_trigger signal by 1 clock cycle
 -------------------------------
-  COUNT_TRIGGER_1CLK_PROCESS: process(sys_lx_clk)
+  COUNT_TRIGGER_1CLK_PROCESS: process(sys_lx_clk2x)
   begin
-      if (rising_edge(sys_lx_clk)) then
+      if (rising_edge(sys_lx_clk2x)) then
           if ((aresetn = '0') or (link_rst = '1')) then
               Count_trigger_d1 <= '0';
           else
@@ -298,9 +280,9 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
 ----------------------------------------------------------------------------
 ----------------------------------------------------------------------------
 ----------------------------------------------------------------------------
-  DAT_COUNT_PROCESS: process(sys_lx_clk)
+  DAT_COUNT_PROCESS: process(sys_lx_clk2x)
   begin
-      if(rising_edge(sys_lx_clk)) then
+      if(rising_edge(sys_lx_clk2x)) then
           if ((aresetn = '0') or (link_rst = '1')) then
               Dat_Count <= (divide(7 downto 0) - 1);
           else
@@ -312,9 +294,9 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
       end if;
   end process DAT_COUNT_PROCESS;
   
-  DAT_TRIGGER_GEN_PROCESS: process(sys_lx_clk)
+  DAT_TRIGGER_GEN_PROCESS: process(sys_lx_clk2x)
   begin
-      if(rising_edge(sys_lx_clk)) then
+      if(rising_edge(sys_lx_clk2x)) then
           if((aresetn = '0') or (link_rst = '1')) then
               Dat_trigger <= '0';
           elsif(Dat_Count = 0) then
@@ -326,9 +308,9 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
 -------------------------------------------------------------------------------
 -- COUNT_TRIGGER_1CLK_PROCESS : Delay cnt_trigger signal by 1 clock cycle
 -------------------------------
-  DAT_TRIGGER_1CLK_PROCESS: process(sys_lx_clk)
+  DAT_TRIGGER_1CLK_PROCESS: process(sys_lx_clk2x)
   begin
-      if(rising_edge(sys_lx_clk)) then
+      if(rising_edge(sys_lx_clk2x)) then
           if((aresetn = '0') or (link_rst = '1')) then
               Dat_trigger_d1 <= '0';
           else
@@ -349,9 +331,9 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
 -- FSM
 -------------------------------------------------------------------------------
 
-   FSM_SYNC_PROC: process (sys_lx_clk)
+   FSM_SYNC_PROC: process (sys_lx_clk2x)
    begin
-      if rising_edge(sys_lx_clk) then
+      if rising_edge(sys_lx_clk2x) then
          if ((aresetn = '0') or (link_rst = '1')) then
             link_state <= IDLE;
             Lx_DAT <= (others => '0');
@@ -430,9 +412,7 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
                next_link_state <= READ_STRM_DATA;
             end if;
          when READ_STRM_DATA =>
-            if ((baud_en = '1') and (fifo_dout_valid = '1')) then
-               next_link_state <= SEND_BYTE1_N;
-            elsif ((baud_en = '0') and (fifo_dout_valid = '1')) then
+            if (fifo_dout_valid = '1') then
                next_link_state <= START_SEND;
             end if;
          when START_SEND =>
