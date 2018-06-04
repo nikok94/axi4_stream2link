@@ -337,7 +337,7 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
          if ((aresetn = '0') or (link_rst = '1')) then
             link_state <= IDLE;
             Lx_DAT <= (others => '0');
-            Lx_CLK <= '0';
+            Lx_CLK <= 'H';
          else
             link_state <= next_link_state;
             Lx_DAT <= Lx_DAT_out;
@@ -348,55 +348,39 @@ FIFO_INST : entity axis2link_v1_00_a.axis_async_fifo
    
    FSM_OUTPUT_DECODE: process (link_state, tdata)
    begin
-      if link_state = IDLE then
-         Lx_CLK_out <= '0';
-         Lx_DAT_out <= (others => '0');
+      Lx_CLK_out <= '1';
+      Lx_DAT_out <= (others => '0');
+      rd_strm_data <= '0';
+      case (link_state) is
+      when IDLE =>
+         Lx_CLK_out <= 'H';
+      when LINK_PORT_ST_RD =>
          rd_strm_data <= '0';
-      elsif link_state = LINK_PORT_ST_RD then
-         Lx_CLK_out <= '1';
-         Lx_DAT_out <= (others => '0');
-         rd_strm_data <= '0';
-      elsif link_state = READ_STRM_DATA then
-         Lx_CLK_out <= '1';
-         Lx_DAT_out <= (others=> '0');
+      when READ_STRM_DATA =>
          rd_strm_data <= '1';
-      elsif link_state = START_SEND then
-         Lx_CLK_out <= '1';
-         rd_strm_data <= '0';
+      when START_SEND =>
          Lx_DAT_out <= tdata(31 downto 24);
-      elsif link_state = SEND_BYTE1_N then
+      when SEND_BYTE1_N =>
          Lx_CLK_out <= '0';
          Lx_DAT_out <= tdata(31 downto 24);
-         rd_strm_data <= '0';
-      elsif link_state = SEND_BYTE2_P then
-         Lx_CLK_out <= '1';
+      when SEND_BYTE2_P =>
          Lx_DAT_out <= tdata(23 downto 16);
-         rd_strm_data <= '0';
-      elsif link_state = SEND_BYTE2_N then
+      when SEND_BYTE2_N =>
          Lx_CLK_out <= '0';
          Lx_DAT_out <= tdata(23 downto 16);
-         rd_strm_data <= '0';
-      elsif link_state = SEND_BYTE3_P then
-         Lx_CLK_out <= '1';
+      when SEND_BYTE3_P =>
          Lx_DAT_out <= tdata(15 downto 8);
-         rd_strm_data <= '0';
-      elsif link_state = SEND_BYTE3_N then
+      when SEND_BYTE3_N =>
          Lx_CLK_out <= '0';
          Lx_DAT_out <= tdata(15 downto 8);
-         rd_strm_data <= '0';
-      elsif link_state = SEND_BYTE4_P then
-         Lx_CLK_out <= '1';
+      when SEND_BYTE4_P =>
          Lx_DAT_out <= tdata(7 downto 0);
-         rd_strm_data <= '0';
-      elsif link_state = SEND_BYTE4_N then
+      when SEND_BYTE4_N =>
          Lx_CLK_out <= '0';
          Lx_DAT_out <= tdata(7 downto 0);
-         rd_strm_data <= '0';
-      else
-         Lx_CLK_out <= '0';
-         Lx_DAT_out <= (others => '0');
-         rd_strm_data <= '0';
-      end if;
+      when others =>
+         Lx_CLK_out <= 'H';
+      end case;
    end process;
  
    FSM_NEXT_STATE_DECODE: process (link_state, aresetn, Lx_ACK, fifo_dout_valid, baud_en, Count_trigger_pulse)
